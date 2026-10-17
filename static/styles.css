@@ -1,0 +1,52 @@
+/* Small presentation layer; the website and business logic live in Python. */
+.stMainBlockContainer { max-width: 1180px; padding-top: 5rem; padding-bottom: 2rem; }
+.brand { display: flex; gap: .35rem; align-items: center; font-size: 1.6rem; font-weight: 800; padding: .45rem 0; }
+.brand span { color: #bb503a; }
+.brand small { color: #626f58; border-left: 1px solid #d4dbcd; font-size: .8rem; margin-left: 1rem; padding-left: 1rem; font-weight: 400; }
+.hero { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 2.5rem .75rem; }
+.hero h1 { font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: 1.4; padding: 0; font-weight: 800; letter-spacing: .02em; margin: .65rem 0 1rem; }
+.hero h1 span { color: #bb503a; white-space: nowrap; text-decoration: underline; text-decoration-color: #e9b1a2; text-underline-offset: .25em; text-decoration-thickness: 3px; }
+.hero p { color: #626f58; line-height: 1.9; font-size: .9rem; }
+.hero .eyebrow { font-size: .7rem; letter-spacing: .22em; font-weight: 700; }
+.hero .hero-tags { margin-top: 1.4rem; margin-bottom: 0; font-size: .8rem; }
+.hero img { width: 34%; max-width: 330px; height: auto; aspect-ratio: 420 / 290; flex-shrink: 0; }
+.st-key-source_strip { border: 1px solid #dce3d2; border-radius: 12px; background: #edf0e5; padding: 1rem 1.25rem; margin-bottom: .8rem; }
+.source-badge { background: #f8faf3; border: 1px solid #dbe2ce; border-radius: 6px; padding: .4rem .8rem; color: #626f58; font-size: .8rem; float: right; }
+.st-key-filters_panel { background: #fff; padding: 1.5rem; border-color: #e1e5d8; border-radius: 14px; }
+.st-key-pick_panel { padding: 1.5rem 2rem; border-color: #e1e5d8; border-radius: 14px; background: #fdfcf7; }
+.st-key-filters_panel h3 { font-size: 1.1rem; }
+.st-key-pick_panel > div { gap: .8rem; }
+.pick-topline { color: #626f58; font-family: Georgia, serif; font-size: .8rem; letter-spacing: .12em; }
+.empty-result, .recommendation { text-align: center; min-height: 270px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 1rem 0; }
+.empty-result > div { font-size: 4.5rem; color: #68805a; line-height: 1.1; margin-bottom: 1rem; }
+.empty-result h2, .recommendation h2 { font-size: clamp(1.45rem, 2.4vw, 2rem); font-weight: 700; padding: 0; margin: .7rem 0; overflow-wrap: anywhere; }
+.empty-result p, .recommendation p { color: #626f58; font-size: .9rem; line-height: 1.9; margin: .4rem 0; }
+.recommendation .result-eyebrow { color: #bb503a; letter-spacing: .15em; font-size: .8rem; }
+.tag { display: inline-block; padding: .15rem .6rem; border-radius: 5px; background: #eaf0e1; color: #4a633d; margin: 0 .2rem; font-size: .8rem; }
+.recommendation .result-details { margin-top: 1rem; }
+.recommendation .result-note { font-size: .8rem; max-width: 95%; overflow-wrap: anywhere; }
+.pick-footer { text-align: center; font-size: .8rem; color: #626f58; padding-top: 1rem; border-top: 1px dashed #dce1d1; margin-top: .5rem; }
+.food-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; margin-bottom: 1rem; }
+.food-card { padding: 1.2rem 1rem; background: #fff; border: 1px solid #e1e5d8; border-radius: 12px; display: flex; align-items: center; gap: .9rem; min-width: 0; }
+.food-card-icon { background: #f3ecdd; width: 50px; height: 60px; display: grid; place-items: center; border-radius: 10px; flex-shrink: 0; font-size: 1.7rem; }
+.food-card-copy { min-width: 0; }
+.food-card h3 { font-size: .95rem; font-weight: 600; margin: .35rem 0; padding: 0; overflow-wrap: anywhere; }
+.food-card .muted, .food-card p { color: #626f58; font-size: .75rem; line-height: 1.8; margin: 0; }
+.st-key-template_callout { padding: 1.3rem; border-radius: 12px; border: 1px dashed #c8d3bb; background: #f0f2e8; margin-top: 1rem; }
+.site-footer { margin-top: 1rem; padding-top: 1.5rem; border-top: 1px solid #dce1d3; color: #626f58; display: flex; justify-content: space-between; gap: 1rem; font-size: .8rem; }
+@media (max-width: 760px) {
+  .stMainBlockContainer { padding: 4rem 1rem 1.3rem; }
+  .brand { font-size: 1.25rem; }
+  .brand small { display: none; }
+  .hero { padding: 1.5rem .1rem; gap: .25rem; }
+  .hero img { width: 30%; min-width: 95px; }
+  .hero h1 { font-size: 2.2rem; }
+  .hero .hero-tags { font-size: .7rem; }
+  .hero p { font-size: .8rem; }
+  .st-key-source_strip { padding: .8rem; }
+  .st-key-filters_panel, .st-key-pick_panel { padding: 1.2rem; }
+  .food-grid { grid-template-columns: 1fr; }
+  .food-card { padding: 1rem; }
+  .source-badge { float: none; display: inline-block; }
+  .recommendation, .empty-result { min-height: 245px; }
+}

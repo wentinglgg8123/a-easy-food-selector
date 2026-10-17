@@ -1,0 +1,15 @@
+[project]
+name = "nthu-food-picker"
+version = "2.0.0"
+description = "以 Python 製作的清大 Excel 餐廳隨機推薦網站"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["browser: real Chromium browser checks (run separately)"]
+addopts = "-m 'not browser'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
