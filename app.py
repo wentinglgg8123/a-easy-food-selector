@@ -17,9 +17,8 @@ from food_picker.session import PickerSession
 
 ROOT = Path(__file__).parent
 MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-PRICE_OPTIONS = {"不限等級": None, **{f"等級 {i} 以內": i for i in range(1, 6)}}
 FILTER_DEFAULTS = {
-    "location_choice": "all", "category_choice": "所有種類", "price_choice": "不限等級",
+    "location_choices": [], "category_choices": [], "price_choices": [],
     "occasion_choice": [], "pace_choice": [], "query_choice": "", "include_closed": False,
     "max_price_choice": None,
 }
@@ -37,13 +36,12 @@ def reset_filters() -> None:
 
 
 def read_filters() -> Filters:
-    category = st.session_state.get("category_choice", "所有種類")
     occasions = st.session_state.get("occasion_choice", [])
     paces = st.session_state.get("pace_choice", [])
     return Filters(
-        location=st.session_state.get("location_choice", "all"),
-        category="all" if category == "所有種類" else category,
-        max_price_level=PRICE_OPTIONS[st.session_state.get("price_choice", "不限等級")],
+        locations=tuple(st.session_state.get("location_choices", [])),
+        categories=tuple(st.session_state.get("category_choices", [])),
+        price_levels=tuple(st.session_state.get("price_choices", [])),
         max_price=st.session_state.get("max_price_choice"),
         query=st.session_state.get("query_choice", ""),
         one_person="一個人吃" in occasions, dating="約會" in occasions,
@@ -153,12 +151,31 @@ def render_source(state: PickerSession) -> None:
 def render_filters(state: PickerSession) -> Filters:
     st.html('<div id="discover"></div>')
     st.subheader("篩選條件", anchor=False)
+    st.caption("直接點選，可複選；再次點選即可取消。地點、種類與價格各組內符合任一選項，組與組之間需同時符合；未選的組別不限。")
     locations = sorted({r.location for r in state.restaurants if r.location}, key=location_label)
-    st.selectbox("地點", ["all", *locations], format_func=lambda code: "所有地點" if code == "all" else location_label(code), key="location_choice")
-    st.selectbox("食物種類", ["所有種類", *sorted({r.category for r in state.restaurants})], key="category_choice")
-    st.selectbox("價格等級", list(PRICE_OPTIONS), key="price_choice", help="保留 Excel 的 1–5 分級，未換算成新臺幣；選擇上限時不包含未分級資料。")
-    st.multiselect("用餐情境", ["一個人吃", "約會", "聚餐"], key="occasion_choice", placeholder="所有情境", help="多選時，店家需同時有這些標記。未標記不代表不適合。")
-    st.multiselect("用餐節奏", ["快速上菜", "慢慢享用"], key="pace_choice", placeholder="不限節奏", help="多選時需同時符合；標記來自原始 Excel。")
+    places, cuisines = st.columns([1, 2], gap="large")
+    with places:
+        st.pills("地點", locations, selection_mode="multi", format_func=location_label,
+                 key="location_choices", width="stretch", wrap=True)
+    with cuisines:
+        st.pills("食物種類", sorted({r.category for r in state.restaurants}),
+                 selection_mode="multi", key="category_choices", width="stretch", wrap=True)
+    prices, occasions, paces = st.columns([1.2, 1, 1], gap="large")
+    with prices:
+        st.pills("價格等級", list(range(1, 6)), selection_mode="multi",
+                 format_func=lambda level: f"等級 {level}", key="price_choices",
+                 width="stretch", wrap=True,
+                 help="選取確切等級，例如 1、3；不選則不限。沿用 Excel 的 1–5 分級，並非金額；選取等級時不包含未分級店家。")
+    with occasions:
+        st.pills("用餐情境", ["一個人吃", "約會", "聚餐"], selection_mode="multi",
+                 key="occasion_choice", width="stretch", wrap=True,
+                 help="多選時，店家需同時有這些標記。未標記不代表不適合。")
+        st.caption("需同時符合所選情境")
+    with paces:
+        st.pills("用餐節奏", ["快速上菜", "慢慢享用"], selection_mode="multi",
+                 key="pace_choice", width="stretch", wrap=True,
+                 help="多選時需同時符合；標記來自原始 Excel。")
+        st.caption("需同時符合所選節奏")
     st.text_input("搜尋餐廳", placeholder="店名、地點、料理或備註", key="query_choice", max_chars=200)
     with st.expander("更多選項"):
         st.checkbox("包含已註記歇業店家", key="include_closed", help="僅供瀏覽與查詢；歇業店家不參與隨機推薦。")
@@ -167,8 +184,11 @@ def render_filters(state: PickerSession) -> Filters:
     filters = read_filters()
     candidates = state.candidates(filters)
     available = sum(not r.is_closed for r in candidates)
-    st.caption(f"{len(candidates)} 間符合條件 · {available} 間可抽選")
-    st.button("重設篩選", on_click=reset_filters, type="tertiary")
+    count, reset = st.columns([3, 1], vertical_alignment="center")
+    with count:
+        st.caption(f"{len(candidates)} 間符合條件 · {available} 間可抽選")
+    with reset:
+        st.button("重設篩選", on_click=reset_filters, type="tertiary", width="stretch")
     return filters
 
 
@@ -189,7 +209,7 @@ def render_recommendation(state: PickerSession, filters: Filters) -> None:
             f'<span class="result-icon">{food_icon(current)}</span></div>'
             '<div class="result-copy"><p class="result-eyebrow">這次推薦給你</p>'
             f'<h2>{escape(current.name)}</h2>'
-            f'<div class="result-meta"><strong>{escape(area_label(current))}</strong><span>{escape(current.category)}</span><span>{escape(price_label(current))}</span></div>'
+            f'<div class="result-meta"><a class="location-link" href="{escape(map_url(current), quote=True)}" target="_blank" rel="noopener noreferrer" aria-label="在 Google 地圖搜尋{escape(current.name, quote=True)}">{escape(current.address or area_label(current))} ↗</a><span>{escape(current.category)}</span><span>{escape(price_label(current))}</span></div>'
             f'<div class="result-tags">{tags}</div>'
             f'<p class="result-note">{escape(current.note or "名單沒有額外備註，出發前記得確認營業資訊。")}</p>'
             '</div></section>'
@@ -222,7 +242,12 @@ def render_catalog(state: PickerSession, filters: Filters) -> None:
         st.info("沒有符合條件的餐廳，調整上方篩選再試試。")
     with st.expander(f"查看全部符合條件的餐廳（{len(candidates)} 間）"):
         if candidates:
-            st.dataframe(table_rows(candidates), hide_index=True, width="stretch")
+            st.dataframe(
+                table_rows(candidates), hide_index=True, width="stretch",
+                column_config={"Google 地圖": st.column_config.LinkColumn(
+                    "Google 地圖", display_text="開啟餐廳地圖", help="以店名與地址／地點搜尋 Google 地圖。",
+                )},
+            )
             st.download_button("匯出篩選名單", export_restaurants(candidates), file_name="食刻決定_篩選餐廳.xlsx", mime=MIME_XLSX, on_click="ignore", icon=":material/download:")
         else:
             st.write("目前沒有符合條件的餐廳。")
@@ -252,13 +277,10 @@ def main() -> None:
     render_header()
     render_hero(state)
     render_source(state)
-    left, right = st.columns([1, 2], gap="large")
-    with left:
-        with st.container(border=True, key="filters_panel"):
-            filters = render_filters(state)
-    with right:
-        with st.container(border=True, key="pick_panel"):
-            render_recommendation(state, filters)
+    with st.container(border=True, key="filters_panel"):
+        filters = render_filters(state)
+    with st.container(border=True, key="pick_panel"):
+        render_recommendation(state, filters)
     render_catalog(state, filters)
     render_footer(state)
 

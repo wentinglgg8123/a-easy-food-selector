@@ -285,6 +285,76 @@ def test_new_filters_combine_and_closed_restaurants_are_opt_in():
     assert filter_restaurants(restaurants, Filters(max_price=100)) == []
 
 
+@pytest.fixture
+def multiselect_catalog():
+    return parse_rows([
+        RICH_HEADERS,
+        ["公館拉麵", "Gongguan", "Ramen", 1, "O", None, "O"],
+        ["師大甜點", "Shida", "Dessert", 3, "O", None, "O"],
+        ["新生拉麵", "XinshengSouth", "Ramen", 2, "O", None, "O"],
+        ["公館牛排", "Gongguan", "Steak", 3, "O", None, None],
+        ["公館未知價位", "Gongguan", "Ramen", None, "O", None, "O"],
+        ["師大歇業", "Shida", "Dessert", 1, "O", None, "O", None, None, None, "關門了"],
+    ]).restaurants
+
+
+def test_location_multiselect_matches_a_union_without_duplicating_restaurants(multiselect_catalog):
+    filters = Filters(locations=("Ｇｏｎｇｇｕａｎ", "shida", "Gongguan"))
+    assert [restaurant.name for restaurant in filter_restaurants(multiselect_catalog, filters)] == [
+        "公館拉麵", "師大甜點", "公館牛排", "公館未知價位",
+    ]
+
+
+def test_category_multiselect_matches_raw_codes_and_localized_labels(multiselect_catalog):
+    filters = Filters(categories=("ＲＡＭＥＮ", "甜點"))
+    assert [restaurant.name for restaurant in filter_restaurants(multiselect_catalog, filters)] == [
+        "公館拉麵", "師大甜點", "新生拉麵", "公館未知價位",
+    ]
+
+
+def test_price_multiselect_matches_exact_tiers_and_excludes_unknowns(multiselect_catalog):
+    filtered = filter_restaurants(multiselect_catalog, Filters(price_levels=(1, 3)))
+    assert [restaurant.name for restaurant in filtered] == ["公館拉麵", "師大甜點", "公館牛排"]
+    assert "新生拉麵" not in {restaurant.name for restaurant in filtered}
+    unrestricted = filter_restaurants(multiselect_catalog, Filters(price_levels=()))
+    assert "公館未知價位" in {restaurant.name for restaurant in unrestricted}
+
+
+def test_multiselect_groups_and_flags_are_applied_together(multiselect_catalog):
+    filters = Filters(
+        locations=("Gongguan", "Shida"), categories=("Ramen", "Dessert", "Steak"),
+        price_levels=(1, 3), one_person=True, gathering=True,
+    )
+    assert [restaurant.name for restaurant in filter_restaurants(multiselect_catalog, filters)] == [
+        "公館拉麵", "師大甜點",
+    ]
+    assert [restaurant.name for restaurant in filter_restaurants(
+        multiselect_catalog, replace(filters, include_closed=True)
+    )] == ["公館拉麵", "師大甜點", "師大歇業"]
+
+
+def test_legacy_singular_filters_and_maxima_remain_additional_constraints(multiselect_catalog):
+    filters = Filters(
+        location="Gongguan", locations=("Gongguan", "Shida"), category="Ramen",
+        categories=("Ramen", "Dessert"), max_price_level=2, price_levels=(1, 3),
+    )
+    assert [restaurant.name for restaurant in filter_restaurants(multiselect_catalog, filters)] == ["公館拉麵"]
+    assert filter_restaurants(multiselect_catalog, replace(filters, location="XinshengSouth")) == []
+    assert filter_restaurants(multiselect_catalog, replace(filters, category="Steak")) == []
+    assert filter_restaurants(multiselect_catalog, replace(filters, max_price=100)) == []
+
+
+def test_empty_multiselect_groups_preserve_legacy_defaults_and_currency_budgets(multiselect_catalog):
+    assert filter_restaurants(multiselect_catalog, Filters()) == filter_restaurants(
+        multiselect_catalog, Filters(locations=(), categories=(), price_levels=())
+    )
+    demo = demo_restaurants()
+    legacy_filters = Filters(area="campus", category="中式", max_price=100)
+    assert filter_restaurants(demo, legacy_filters) == [demo[0]]
+    assert filter_restaurants(demo, replace(legacy_filters, categories=("中式", "日式"))) == [demo[0]]
+    assert filter_restaurants(demo, replace(legacy_filters, price_levels=(1, 2))) == []
+
+
 def test_bundled_workbook_retains_all_rows_codes_and_fields():
     from openpyxl import load_workbook
 

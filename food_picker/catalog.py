@@ -386,8 +386,15 @@ def parse_rows(rows: Sequence[Sequence[object]]) -> ParseResult:
 
 
 def filter_restaurants(restaurants: Sequence[Restaurant], filters: Filters) -> list[Restaurant]:
-    """Apply all filters together, excluding unknown prices when a budget is set."""
+    """Match any selected value per group and apply all filter groups together.
+
+    Empty multi-select tuples leave that group unrestricted. Legacy singular
+    fields remain additional constraints, including their budget semantics.
+    """
     query = _normalise(filters.query)
+    locations = {_normalise(location) for location in filters.locations}
+    categories = {_normalise(category) for category in filters.categories}
+    price_levels = set(filters.price_levels)
     result = []
     for restaurant in restaurants:
         if restaurant.is_closed and not filters.include_closed:
@@ -397,9 +404,16 @@ def filter_restaurants(restaurants: Sequence[Restaurant], filters: Filters) -> l
                 continue
         if filters.area != "all" and restaurant.area != filters.area:
             continue
-        if filters.category != "all" and _normalise(filters.category) not in {_normalise(restaurant.category), _normalise(restaurant.genre)}:
+        restaurant_categories = {_normalise(restaurant.category), _normalise(restaurant.genre)}
+        if filters.category != "all" and _normalise(filters.category) not in restaurant_categories:
+            continue
+        if categories and categories.isdisjoint(restaurant_categories):
             continue
         if filters.location != "all" and _normalise(filters.location) != _normalise(restaurant.location):
+            continue
+        if locations and _normalise(restaurant.location) not in locations:
+            continue
+        if price_levels and restaurant.price_level not in price_levels:
             continue
         if filters.max_price_level is not None and (restaurant.price_level is None or restaurant.price_level > filters.max_price_level):
             continue

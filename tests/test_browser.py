@@ -146,26 +146,27 @@ def _import_catalog(page):
     _expect_count(page, 3)
 
 
-def _select(page, label, value):
-    _wait_idle(page)
-    combo = page.get_by_role("combobox", name=label, exact=True)
-    combo.click()
-    combo.fill(value)
-    page.get_by_role("option", name=value, exact=True).click()
-    expect(combo).to_have_value(value)
-    _wait_idle(page)
-
-
-def _multiselect(page, label, values):
+def _select_pills(page, label, values):
     for value in values:
         _wait_idle(page)
-        combo = page.get_by_role("combobox", name=label, exact=True)
-        combo.click()
-        combo.fill(value)
-        page.get_by_role("option", name=value, exact=True).click()
-        page.keyboard.press("Escape")
-        expect(page.get_by_role("button", name=f"Remove {value}", exact=True)).to_be_visible()
+        button = page.get_by_role("toolbar", name=label, exact=True).get_by_role(
+            "button", name=value, exact=True
+        )
+        expect(button).to_have_attribute("aria-pressed", "false")
+        button.click()
+        expect(button).to_have_attribute("aria-pressed", "true")
         _wait_idle(page)
+
+
+def _toggle_pill_off(page, label, value):
+    _wait_idle(page)
+    button = page.get_by_role("toolbar", name=label, exact=True).get_by_role(
+        "button", name=value, exact=True
+    )
+    expect(button).to_have_attribute("aria-pressed", "true")
+    button.click()
+    expect(button).to_have_attribute("aria-pressed", "false")
+    _wait_idle(page)
 
 
 def _wait_idle(page):
@@ -196,6 +197,9 @@ def _download_rows(page, button_name, destination):
 
 def test_default_catalog_is_shared_and_random_recommendations_do_not_repeat(page):
     expect(page.locator("header").get_by_text(re.compile("FOODFLIX"))).to_be_visible()
+    expect(page.get_by_role("combobox")).to_have_count(0)
+    expect(page.get_by_role("toolbar")).to_have_count(5)
+    expect(page.get_by_role("toolbar", name="食物種類", exact=True).get_by_role("button")).to_have_count(25)
     _expect_count(page, 175)
     expect(page.get_by_role("button", name="下載完整名單", exact=True)).to_be_visible()
     page.get_by_role("button", name="幫我決定這一餐", exact=True).click()
@@ -212,12 +216,12 @@ def test_default_catalog_is_shared_and_random_recommendations_do_not_repeat(page
 
 
 def test_actual_location_genre_price_and_occasion_filters_then_reset(page):
-    _select(page, "地點", "公館")
+    _select_pills(page, "地點", ["公館"])
     _expect_count(page, 75)
-    _select(page, "食物種類", "牛排")
+    _select_pills(page, "食物種類", ["牛排"])
     _expect_count(page, 4)
-    _select(page, "價格等級", "等級 1 以內")
-    _multiselect(page, "用餐情境", ["約會", "聚餐"])
+    _select_pills(page, "價格等級", ["等級 1"])
+    _select_pills(page, "用餐情境", ["約會", "聚餐"])
     _expect_count(page, 1)
     page.get_by_role("button", name="幫我決定這一餐", exact=True).click()
     expect(page.locator(f"{RESULT} h2")).to_have_text("孫東寶牛排")
@@ -228,17 +232,19 @@ def test_actual_location_genre_price_and_occasion_filters_then_reset(page):
     page.get_by_role("button", name="重設篩選", exact=True).click()
     _expect_count(page, 175)
     expect(query).to_have_value("")
-    expect(page.get_by_role("combobox", name="食物種類", exact=True)).to_have_value("所有種類")
-    expect(page.get_by_role("combobox", name="價格等級", exact=True)).to_have_value("不限等級")
+    expect(page.get_by_role("toolbar", name="食物種類", exact=True).get_by_role("button", pressed=True)).to_have_count(0)
+    expect(page.get_by_role("toolbar", name="價格等級", exact=True).get_by_role("button", pressed=True)).to_have_count(0)
+    for label in ("地點", "用餐情境", "用餐節奏"):
+        expect(page.get_by_role("toolbar", name=label, exact=True).get_by_role("button", pressed=True)).to_have_count(0)
 
 
-def test_rich_import_requires_all_features_uses_coordinates_and_restores_defaults(page):
+def test_rich_import_requires_all_features_uses_named_maps_and_restores_defaults(page):
     _import_catalog(page)
-    _select(page, "地點", "公館")
-    _select(page, "食物種類", "便當")
-    _select(page, "價格等級", "等級 2 以內")
-    _multiselect(page, "用餐情境", ["一個人吃", "約會", "聚餐"])
-    _multiselect(page, "用餐節奏", ["快速上菜", "慢慢享用"])
+    _select_pills(page, "地點", ["公館"])
+    _select_pills(page, "食物種類", ["便當"])
+    _select_pills(page, "價格等級", ["等級 2"])
+    _select_pills(page, "用餐情境", ["一個人吃", "約會", "聚餐"])
+    _select_pills(page, "用餐節奏", ["快速上菜", "慢慢享用"])
     _expect_count(page, 1)
     page.get_by_role("button", name="幫我決定這一餐", exact=True).click()
     expect(page.locator(f"{RESULT} h2")).to_have_text("測試旗標完整店")
@@ -246,14 +252,14 @@ def test_rich_import_requires_all_features_uses_coordinates_and_restores_default
     link = page.get_by_role("link", name="在 Google 地圖查看", exact=True)
     expect(link).to_be_visible()
     query = parse_qs(urlparse(link.get_attribute("href")).query)["query"][0]
-    assert query.replace(" ", "") == "25.01826359388706,121.5310917601049"
+    assert "測試旗標完整店" in query and "公館" in query
     page.get_by_role("button", name="再推薦一家", exact=True).click()
     expect(page.locator(f"{RESULT} h2")).to_have_text("測試旗標完整店")
     page.get_by_role("button", name="恢復內建名單", exact=True).click()
     _expect_count(page, 175)
     expect(page.get_by_role("button", name="恢復內建名單", exact=True)).not_to_be_visible()
     expect(page.locator(RESULT)).not_to_be_visible()
-    expect(page.get_by_role("combobox", name="食物種類", exact=True)).to_have_value("所有種類")
+    expect(page.get_by_role("toolbar", name="食物種類", exact=True).get_by_role("button", pressed=True)).to_have_count(0)
 
 
 def test_invalid_import_preserves_the_current_custom_catalog(page):
@@ -294,7 +300,7 @@ def test_full_source_template_and_filtered_downloads_are_real_workbooks(page, tm
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).not_to_be_visible()
 
-    _select(page, "地點", "公館")
+    _select_pills(page, "地點", ["公館"])
     _expect_count(page, 75)
     page.get_by_text("查看全部符合條件的餐廳（75 間）", exact=True).click()
     rows = _download_rows(page, "匯出篩選名單", tmp_path / "filtered.xlsx")
@@ -319,3 +325,39 @@ def test_closed_restaurant_is_visible_only_on_request_and_never_recommended(page
     page.get_by_role("button", name="重設篩選", exact=True).click()
     _expect_count(page, 175)
     expect(checkbox).not_to_be_checked()
+
+
+def test_multiple_pills_union_within_groups_and_toggle_off_without_dropdowns(page):
+    content = _workbook([
+        EXCEL_HEADERS,
+        ["甲店", "Gongguan", "Bento", 1],
+        ["乙店", "Shida", "Steak", 3],
+        ["丙店", "Gongguan", "Steak", 2],
+        ["丁店", "Liuzhangli", "Bento", 3],
+        ["戊店", "Shida", "Cafe", 1],
+        ["己店", "Gongguan", "Steak", 3],
+    ])
+    dialog = _upload(page, content, "多選名單.xlsx")
+    expect(dialog).not_to_be_visible()
+    _expect_count(page, 6)
+    expect(page.get_by_role("combobox")).to_have_count(0)
+    _select_pills(page, "地點", ["公館", "師大"])
+    _expect_count(page, 5)
+    _select_pills(page, "食物種類", ["便當", "牛排"])
+    _expect_count(page, 4)
+    _select_pills(page, "價格等級", ["等級 1", "等級 3"])
+    _expect_count(page, 3)
+    catalog = page.get_by_role("region", name="餐廳名單", exact=True)
+    for name in ("甲店", "乙店", "己店"):
+        expect(catalog.get_by_role("heading", name=name, exact=True)).to_be_visible()
+    for name in ("丙店", "丁店", "戊店"):
+        expect(catalog.get_by_role("heading", name=name, exact=True)).to_have_count(0)
+
+    _toggle_pill_off(page, "價格等級", "等級 1")
+    _expect_count(page, 2)
+    _toggle_pill_off(page, "價格等級", "等級 3")
+    _expect_count(page, 4)
+    page.get_by_role("button", name="重設篩選", exact=True).click()
+    _expect_count(page, 6)
+    for label in ("地點", "食物種類", "價格等級", "用餐情境", "用餐節奏"):
+        expect(page.get_by_role("toolbar", name=label, exact=True).get_by_role("button", pressed=True)).to_have_count(0)

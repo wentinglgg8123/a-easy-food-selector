@@ -51,6 +51,9 @@ class Filters:
     fast_serve: bool = False
     slow_eat: bool = False
     include_closed: bool = False
+    locations: tuple[str, ...] = ()
+    categories: tuple[str, ...] = ()
+    price_levels: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

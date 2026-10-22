@@ -1,6 +1,8 @@
 """Exercise the public default catalog, rendered filters, and session callbacks."""
 
+import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -30,9 +32,11 @@ def test_initial_page_loads_real_catalog_for_every_visitor(app):
     assert "孫東寶牛排" in names(app)
     assert "郭董麻辣牛肉麵" not in names(app)
     assert not app.button(key="pick_meal").disabled
-    assert app.selectbox(key="location_choice").value == "all"
-    assert len(app.selectbox(key="location_choice").options) == 9
-    assert len(app.selectbox(key="category_choice").options) == 26
+    assert app.pills(key="location_choices").value == []
+    assert len(app.pills(key="location_choices").options) == 8
+    assert len(app.pills(key="category_choices").options) == 25
+    assert len(app.selectbox) == 0 and len(app.multiselect) == 0
+    assert len(app.pills) == 5
     assert any("FOODFLIX" in element.value for element in app.get("html"))
 
 
@@ -52,10 +56,10 @@ def test_pick_renders_real_recommendation_without_consecutive_repeats(app):
 
 
 def test_location_genre_price_and_occasion_filters_combine_on_actual_data(app):
-    app.selectbox(key="location_choice").set_value("Gongguan")
-    app.selectbox(key="category_choice").set_value("牛排")
-    app.selectbox(key="price_choice").set_value("等級 1 以內")
-    app.multiselect(key="occasion_choice").set_value(["約會", "聚餐"])
+    app.pills(key="location_choices").set_value(["Gongguan"])
+    app.pills(key="category_choices").set_value(["牛排"])
+    app.pills(key="price_choices").set_value([1])
+    app.pills(key="occasion_choice").set_value(["約會", "聚餐"])
     app.run()
     assert not app.exception
     assert names(app) == ["孫東寶牛排"]
@@ -74,11 +78,11 @@ def test_all_five_feature_flags_are_required_when_selected(app):
     ])
     app.session_state["picker"].import_catalog(result, "情境名單.xlsx")
     app.run()
-    app.selectbox(key="location_choice").set_value("Gongguan")
-    app.selectbox(key="category_choice").set_value("便當")
-    app.selectbox(key="price_choice").set_value("等級 2 以內")
-    app.multiselect(key="occasion_choice").set_value(["一個人吃", "約會", "聚餐"])
-    app.multiselect(key="pace_choice").set_value(["快速上菜", "慢慢享用"])
+    app.pills(key="location_choices").set_value(["Gongguan"])
+    app.pills(key="category_choices").set_value(["便當"])
+    app.pills(key="price_choices").set_value([2])
+    app.pills(key="occasion_choice").set_value(["一個人吃", "約會", "聚餐"])
+    app.pills(key="pace_choice").set_value(["快速上菜", "慢慢享用"])
     app.text_input(key="query_choice").set_value("測試")
     app.run()
     assert not app.exception
@@ -100,11 +104,11 @@ def test_closed_restaurant_can_be_browsed_but_cannot_be_recommended(app):
 
 
 def test_changing_location_hides_selection_and_preserves_history(app):
-    app.selectbox(key="location_choice").set_value("Gongguan").run()
+    app.pills(key="location_choices").set_value(["Gongguan"]).run()
     app.button(key="pick_meal").click().run()
     chosen = app.session_state["picker"].selected
     assert chosen.location == "Gongguan"
-    app.selectbox(key="location_choice").set_value("Shida").run()
+    app.pills(key="location_choices").set_value(["Shida"]).run()
     assert not app.exception
     assert not any('aria-label="餐廳推薦結果"' in element.value for element in app.get("html"))
     assert app.session_state["picker"].history == [chosen]
@@ -122,7 +126,7 @@ def test_legacy_custom_catalog_can_be_cleared_back_to_original_public_data(app):
     assert names(app) == ["測試舊版餐廳"]
     assert any("我的餐廳.xlsx" in text.value for text in app.get("html"))
     assert any("未填距離" in warning.value for warning in app.warning)
-    assert "素食" in app.selectbox(key="category_choice").options
+    assert "素食" in app.pills(key="category_choices").options
     app.button(key="pick_meal").click().run()
     assert app.session_state["picker"].selected.name == "測試舊版餐廳"
 
@@ -137,22 +141,22 @@ def test_legacy_custom_catalog_can_be_cleared_back_to_original_public_data(app):
 
 
 def test_empty_search_disables_pick_and_reset_clears_every_filter(app):
-    app.selectbox(key="location_choice").set_value("Gongguan")
-    app.selectbox(key="category_choice").set_value("牛排")
-    app.selectbox(key="price_choice").set_value("等級 2 以內")
-    app.multiselect(key="occasion_choice").set_value(["一個人吃"])
-    app.multiselect(key="pace_choice").set_value(["快速上菜"])
+    app.pills(key="location_choices").set_value(["Gongguan"])
+    app.pills(key="category_choices").set_value(["牛排"])
+    app.pills(key="price_choices").set_value([2])
+    app.pills(key="occasion_choice").set_value(["一個人吃"])
+    app.pills(key="pace_choice").set_value(["快速上菜"])
     app.checkbox(key="include_closed").check()
     app.text_input(key="query_choice").set_value("不存在的餐廳").run()
     assert not app.exception
     assert names(app) == [] and app.button(key="pick_meal").disabled
     next(button for button in app.button if button.label == "重設篩選").click().run()
     assert not app.exception
-    assert app.selectbox(key="location_choice").value == "all"
-    assert app.selectbox(key="category_choice").value == "所有種類"
-    assert app.selectbox(key="price_choice").value == "不限等級"
-    assert app.multiselect(key="occasion_choice").value == []
-    assert app.multiselect(key="pace_choice").value == []
+    assert app.pills(key="location_choices").value == []
+    assert app.pills(key="category_choices").value == []
+    assert app.pills(key="price_choices").value == []
+    assert app.pills(key="occasion_choice").value == []
+    assert app.pills(key="pace_choice").value == []
     assert app.checkbox(key="include_closed").value is False
     assert app.text_input(key="query_choice").value == ""
     assert len(names(app)) == 175
@@ -168,3 +172,43 @@ def test_custom_filename_is_escaped_before_display(app):
     assert "&lt;script&gt;" in source
     assert "<script>" not in source
     assert names(app) == ["測試安全店家"]
+
+
+def test_multiple_locations_cuisines_and_exact_price_levels_union_within_groups(app):
+    result = parse_rows([
+        EXCEL_HEADERS,
+        ["甲店", "Gongguan", "Bento", 1],
+        ["乙店", "Shida", "Steak", 3],
+        ["丙店", "Gongguan", "Steak", 2],
+        ["丁店", "Liuzhangli", "Bento", 3],
+        ["戊店", "Shida", "Cafe", 1],
+        ["己店", "Gongguan", "Steak", 3],
+    ])
+    app.session_state["picker"].import_catalog(result, "多選名單.xlsx")
+    app.run()
+    app.pills(key="location_choices").set_value(["Gongguan", "Shida"])
+    app.pills(key="category_choices").set_value(["便當", "牛排"])
+    app.pills(key="price_choices").set_value([1, 3])
+    app.run()
+    assert not app.exception
+    assert names(app) == ["甲店", "乙店", "己店"]
+    assert "丙店" not in names(app)  # Level 2 is outside the selected exact levels.
+
+
+def test_removing_location_pills_broadens_back_to_the_complete_catalog(app):
+    app.pills(key="location_choices").set_value(["Gongguan", "Shida"]).run()
+    assert not app.exception and len(names(app)) == 78
+    app.pills(key="location_choices").set_value(["Shida"]).run()
+    assert not app.exception and len(names(app)) == 3
+    app.pills(key="location_choices").set_value([]).run()
+    assert not app.exception and len(names(app)) == 175
+
+
+def test_complete_table_provides_named_google_maps_links(app):
+    first_row = app.dataframe[0].value.iloc[0]
+    url = urlparse(first_row["Google 地圖"])
+    assert url.scheme == "https" and url.hostname == "www.google.com"
+    query = parse_qs(url.query)["query"][0]
+    assert "孫東寶牛排" in query and "公館" in query
+    config = json.loads(app.dataframe[0].proto.columns)
+    assert config["Google 地圖"]["type_config"]["type"] == "link"

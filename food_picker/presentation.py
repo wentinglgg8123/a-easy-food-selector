@@ -52,10 +52,18 @@ def distance_label(restaurant: Restaurant) -> str:
 
 
 def map_url(restaurant: Restaurant) -> str:
-    if restaurant.latitude is not None and restaurant.longitude is not None:
-        query = f"{restaurant.latitude}, {restaurant.longitude}"
+    """Search the supplied restaurant name instead of opening a generic coordinate pin.
+
+    The source catalog has no verified postal addresses or Google Place IDs. Its
+    location label and Taiwan provide search context without inventing either.
+    Explicit legacy addresses take precedence over the broader location label.
+    """
+    if restaurant.address.strip():
+        query = f"{restaurant.name} {restaurant.address.strip()}"
     else:
-        query = f"{restaurant.name} {restaurant.address or area_label(restaurant)}"
+        location = area_label(restaurant)
+        context = location if location != "未提供地點" else ""
+        query = " ".join(part for part in (restaurant.name, context, "台灣") if part)
     return "https://www.google.com/maps/search/?" + urlencode({"api": 1, "query": query})
 
 
@@ -79,16 +87,23 @@ def restaurant_card(restaurant: Restaurant, index: int = 0) -> str:
     closed = '<span class="closed-badge">原表註記已歇業</span>' if restaurant.is_closed else ''
     tags = ''.join(f'<span>{escape(label)}</span>' for label in feature_labels(restaurant)[:2])
     note = f'<p class="card-note">{escape(restaurant.note)}</p>' if restaurant.note else ''
+    location = (
+        f'地址：{restaurant.address.strip()}' if restaurant.address.strip()
+        else f'地點：{area_label(restaurant)}'
+    )
     return (
         f'<article class="food-card tone-{poster_tone(restaurant)}">'
         f'<a class="poster-link" href="{escape(map_url(restaurant), quote=True)}" '
-        f'target="_blank" rel="noopener noreferrer" aria-label="在地圖查看 {escape(restaurant.name, quote=True)}">'
+        f'target="_blank" rel="noopener noreferrer" '
+        f'aria-label="在 Google 地圖搜尋 {escape(restaurant.name, quote=True)}（在新分頁開啟）">'
         '<div class="poster-art">'
         f'{closed}<span class="poster-icon" aria-hidden="true">{food_icon(restaurant)}</span>'
         '<span class="poster-play" aria-hidden="true">↗</span></div>'
         f'<div class="card-body"><div class="card-meta"><span>{escape(area_label(restaurant))}</span>'
         f'<span>{escape(restaurant.category)}</span></div><h3>{escape(restaurant.name)}</h3>'
         f'<p class="card-price">{escape(price_label(restaurant))}</p>'
+        f'<p class="card-location">{escape(location)} '
+        '<span class="card-map-label">Google 地圖搜尋 ↗</span></p>'
         f'<div class="card-tags">{tags}</div>{note}</div></a></article>'
     )
 
@@ -98,7 +113,8 @@ def table_rows(restaurants: list[Restaurant]) -> list[dict[str, object]]:
         {"餐廳名稱": r.name, "地點": area_label(r), "食物種類": r.category,
          "價格等級": r.price_level, "一個人吃": r.one_person, "約會": r.dating,
          "聚餐": r.gathering, "快速上菜": r.fast_serve, "慢慢享用": r.slow_eat,
-         "緯度": r.latitude, "經度": r.longitude, "備註": r.note, "原表註記歇業": r.is_closed,
+         "緯度": r.latitude, "經度": r.longitude, "Google 地圖": map_url(r),
+         "備註": r.note, "原表註記歇業": r.is_closed,
          **({"均消（元）": r.price, "距離（公里）": r.distance, "地址": r.address}
             if r.area != "other" or r.price is not None or r.distance is not None or r.address else {})}
         for r in restaurants

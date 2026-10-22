@@ -71,13 +71,34 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role='combobox']:fo
 .st-key-filters_panel h3 { padding: 0 0 10px; color: var(--ink); font-size: 20px; font-weight: 650; line-height: 1.6; }
 .st-key-filters_panel [data-testid='stWidgetLabel'] p { color: var(--ink); font-size: 14px; }
 .st-key-filters_panel [data-testid='stCaptionContainer'] p { font-size: 13px; line-height: 1.8; }
-.st-key-filters_panel [data-testid='stSelectbox'] [role='group'],
-.st-key-filters_panel [data-testid='stMultiSelect'] [role='group'] { border-color: #8c998f; }
+.st-key-filters_panel [data-testid='stButtonGroup'] [role='toolbar'] { gap: 7px; }
+.st-key-filters_panel [data-testid='stButtonGroup'] button[data-variant='pills'] {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 6px 13px;
+  border: 1px solid #8c998f;
+  border-radius: 22px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.st-key-filters_panel [data-testid='stButtonGroup'] button[data-variant='pills']:hover {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+.st-key-filters_panel [data-testid='stButtonGroup'] button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+.st-key-filters_panel [data-testid='stButtonGroup'] button[aria-pressed='true']:hover {
+  background: var(--accent-hover);
+  color: #ffffff;
+}
 .st-key-pick_panel { padding: 25px 28px; }
 .pick-topline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
 .pick-topline > span:first-child { margin-right: auto; color: var(--accent); font-size: 12px; letter-spacing: 1px; }
 .live-dot { flex: 0 0 5px; height: 5px; border-radius: 50%; background: var(--accent); }
-.empty-result { min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 0; text-align: center; }
+.empty-result { min-height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 0; text-align: center; }
 .dice { display: grid; place-items: center; width: 70px; height: 70px; margin-bottom: 18px; border-radius: 14px; background: var(--soft); color: var(--accent); font-size: 48px; line-height: 1; }
 .empty-symbol { color: var(--muted); font-size: 56px; }
 .result-eyebrow { margin: 0 0 12px !important; color: var(--accent) !important; font-size: 12px !important; letter-spacing: .9px; }
@@ -104,6 +125,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role='combobox']:fo
 .result-copy h2 { margin: 0 0 15px; padding: 0; color: var(--ink); font-size: clamp(23px, 2.7vw, 32px); font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
 .result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--muted); font-size: 13px; }
 .result-meta strong { color: var(--accent); font-weight: 600; }
+.location-link { color: var(--accent) !important; font-weight: 600; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.location-link:hover { color: var(--accent-hover) !important; }
 .result-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
 .tag { padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--soft); color: var(--accent); font-size: 12px; }
 .result-note { margin-top: 13px; color: var(--muted); font-size: 13px; line-height: 1.85; overflow-wrap: anywhere; }
@@ -125,6 +148,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role='combobox']:fo
 .card-meta > span:first-child { color: var(--accent); }
 .card-body h3 { margin: 8px 0; padding: 0; color: var(--ink); font-size: 16px; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; }
 .card-price { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.card-location { margin: 9px 0 0; color: var(--accent); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.card-map-label { display: block; text-decoration: underline; text-underline-offset: 3px; }
 .card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
 .card-tags > span { padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 12px; }
 .card-note { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
@@ -173,7 +198,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role='combobox']:fo
   .st-key-filters_panel, .st-key-pick_panel { padding: 19px; }
   .st-key-filters_panel h3 { font-size: 19px; }
   .panel-label { font-size: 12px; letter-spacing: .2px; }
-  .empty-result { min-height: 260px; padding: 24px 0; }
+  .empty-result { min-height: 190px; padding: 24px 0; }
+  .st-key-filters_panel [data-testid='stButtonGroup'] button[data-variant='pills'] { min-height: 42px; }
   .empty-result h2 { font-size: 23px; }
   .empty-result > p:not(.result-eyebrow) { font-size: 13px; }
   .empty-tags { gap: 5px; }
