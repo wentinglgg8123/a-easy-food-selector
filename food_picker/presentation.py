@@ -1,4 +1,4 @@
-"""Escaped display helpers for the food catalog and cinema-inspired cards."""
+"""Escaped display helpers for the food catalog and compact restaurant cards."""
 
 from html import escape
 from urllib.parse import urlencode
@@ -83,9 +83,8 @@ def restaurant_card(restaurant: Restaurant, index: int = 0) -> str:
         f'<article class="food-card tone-{poster_tone(restaurant)}">'
         f'<a class="poster-link" href="{escape(map_url(restaurant), quote=True)}" '
         f'target="_blank" rel="noopener noreferrer" aria-label="在地圖查看 {escape(restaurant.name, quote=True)}">'
-        '<div class="poster-art"><span class="poster-mark" aria-hidden="true">F</span>'
+        '<div class="poster-art">'
         f'{closed}<span class="poster-icon" aria-hidden="true">{food_icon(restaurant)}</span>'
-        f'<span class="poster-genre">{escape(restaurant.genre or restaurant.category)}</span>'
         '<span class="poster-play" aria-hidden="true">↗</span></div>'
         f'<div class="card-body"><div class="card-meta"><span>{escape(area_label(restaurant))}</span>'
         f'<span>{escape(restaurant.category)}</span></div><h3>{escape(restaurant.name)}</h3>'

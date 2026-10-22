@@ -204,11 +204,11 @@ def test_default_catalog_is_shared_and_random_recommendations_do_not_repeat(page
     previous = result.inner_text()
     assert previous != "郭董麻辣牛肉麵"
     for _ in range(3):
-        page.get_by_role("button", name="再抽一間，換個劇情", exact=True).click()
+        page.get_by_role("button", name="再推薦一家", exact=True).click()
         expect(result).not_to_have_text(previous)
         previous = result.inner_text()
         assert previous != "郭董麻辣牛肉麵"
-    expect(page.get_by_role("heading", name="最近播放的美食", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="最近推薦", exact=True)).to_be_visible()
 
 
 def test_actual_location_genre_price_and_occasion_filters_then_reset(page):
@@ -247,7 +247,7 @@ def test_rich_import_requires_all_features_uses_coordinates_and_restores_default
     expect(link).to_be_visible()
     query = parse_qs(urlparse(link.get_attribute("href")).query)["query"][0]
     assert query.replace(" ", "") == "25.01826359388706,121.5310917601049"
-    page.get_by_role("button", name="再抽一間，換個劇情", exact=True).click()
+    page.get_by_role("button", name="再推薦一家", exact=True).click()
     expect(page.locator(f"{RESULT} h2")).to_have_text("測試旗標完整店")
     page.get_by_role("button", name="恢復內建名單", exact=True).click()
     _expect_count(page, 175)
@@ -264,7 +264,7 @@ def test_invalid_import_preserves_the_current_custom_catalog(page):
     page.keyboard.press("Escape")
     expect(dialog).not_to_be_visible()
     _expect_count(page, 3)
-    expect(page.get_by_text(re.compile(r"目前片單：.*測試餐廳\.xlsx"))).to_be_visible()
+    expect(page.get_by_text(re.compile(r"目前名單：.*測試餐廳\.xlsx"))).to_be_visible()
 
 
 def test_page_reload_returns_to_original_bundled_catalog(page):

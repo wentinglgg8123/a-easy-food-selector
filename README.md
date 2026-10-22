@@ -1,6 +1,6 @@
-# FOODFLIX｜食刻決定
+# 食刻決定
 
-用 Excel 餐廳名單隨機決定下一餐的繁體中文網站。以 **Python、Streamlit 與 openpyxl** 實作，採深色及紅色的串流平台風格介面，與 Netflix 無關。
+用 Excel 餐廳名單隨機決定下一餐的繁體中文網站。以 **Python、Streamlit 與 openpyxl** 實作，採淺色、大量留白的簡約介面，讓篩選條件與餐廳推薦清楚易讀。
 
 網站直接載入專案內的 [data/food.xlsx](data/food.xlsx)，每位訪客開啟就能使用，不必自行上傳。原始檔共有 **176 筆餐廳、8 個地點、25 種料理**；其中一筆備註為「關門了」，預設 **175 間可抽選**。名單來自提供的 Excel，包含公館、和平 118 巷、新生南路等地，**不是清華大學周邊 2 公里的完整店家資料**。店家是否營業並未即時查證。
 
@@ -93,7 +93,7 @@ python -m streamlit run app.py
 | `food_picker/excel.py` | Excel 匯入、範本及結果匯出 |
 | `food_picker/session.py` | 每位訪客獨立的名單與推薦紀錄 |
 | `food_picker/presentation.py` | 顯示文字、餐廳卡片與地圖連結 |
-| `static/styles.css` | 深色紅色介面與手機版樣式 |
+| `static/styles.css` | 淺色簡約介面與手機版樣式 |
 | `tests/` | Python 單元、介面與瀏覽器測試 |
 | `tools/language_report.py` | 以原始碼位元組估算 Python 比例 |
 

@@ -1,4 +1,4 @@
-"""Python food discovery website with a cinema-inspired dark interface."""
+"""Python food discovery website with a quiet, light interface."""
 
 from html import escape
 from pathlib import Path
@@ -69,7 +69,7 @@ def template_bytes() -> bytes:
     return build_template()
 
 
-@st.dialog("帶上你的美食片單", width="medium")
+@st.dialog("匯入餐廳名單", width="medium")
 def import_dialog() -> None:
     st.write("網站已內建完整名單；也可以用你自己的 Excel 暫時替換。")
     uploaded = st.file_uploader(
@@ -103,7 +103,7 @@ def import_dialog() -> None:
 def render_header() -> None:
     brand, upload = st.columns([3, 1], vertical_alignment="center")
     with brand:
-        st.html('<header class="brand"><a href="#top" class="wordmark">FOODFLIX</a><span class="brand-sub">食刻決定</span><nav><a href="#discover">探索美食</a><a href="#catalog">美食片單</a></nav><span class="profile" aria-hidden="true">F</span></header>')
+        st.html('<header class="brand"><a href="#top" class="wordmark">食刻決定</a><span class="brand-sub">FOODFLIX</span><nav><a href="#discover">挑選餐廳</a><a href="#catalog">餐廳名單</a></nav></header>')
     with upload:
         if st.button("匯入 Excel 名單", icon=":material/upload:", width="stretch"):
             import_dialog()
@@ -115,16 +115,13 @@ def render_hero(state: PickerSession) -> None:
     genres = len({r.category for r in state.restaurants})
     st.html(
         '<section class="hero" id="top">'
-        '<div class="hero-copy"><p class="eyebrow"><span>F</span> ORIGINAL FOOD COLLECTION</p>'
-        '<h1>下一餐，<br>值得<span>一看。</span></h1>'
-        '<p class="hero-kicker">你的下一口驚喜，現在開播。</p>'
-        '<p class="hero-description">選擇地點、料理與用餐情境，<br>讓今天的美食主角自己出場。</p>'
+        '<div class="hero-copy"><p class="eyebrow">好好吃飯，簡單一點。</p>'
+        '<h1>今天，<span>想吃什麼？</span></h1>'
+        '<p class="hero-description">挑選地點、口味與用餐情境，讓下一餐更簡單。</p>'
         f'<div class="hero-facts"><strong>{count} 間餐廳</strong><span>{places} 個地點</span><span>{genres} 種料理</span></div>'
-        '<a class="hero-link" href="#discover">▶ 開始探索</a>'
-        '</div><div class="hero-visual" aria-hidden="true"><div class="spotlight"></div>'
-        '<img src="app/static/meal.svg" alt=""><span class="hero-stamp">TONIGHT’S SPECIAL</span>'
-        '<span class="hero-visual-note">每一餐，都有值得期待的劇情。</span></div>'
-        '<div class="hero-rating">美食片單 <span>｜</span> 隨機驚喜 <span>｜</span> 由你決定</div>'
+        '<a class="hero-link" href="#discover">開始挑選 ↓</a>'
+        '</div><div class="hero-visual" aria-hidden="true">'
+        '<img src="app/static/meal.svg" alt=""></div>'
         '</section>'
     )
 
@@ -137,10 +134,10 @@ def render_source(state: PickerSession) -> None:
         info, action = st.columns([3, 1], vertical_alignment="center")
         with info:
             if state.is_default:
-                st.markdown(f"**完整片單已就緒** · {len(state.restaurants)} 筆資料 · {available} 間可抽選")
-                st.caption("來自你提供的 Excel，所有訪客開啟網站即可使用。")
+                st.markdown(f"**內建餐廳名單** · {len(state.restaurants)} 筆資料 · {available} 間可抽選")
+                st.caption("已註記歇業的店家會保留供查詢，不參與推薦。")
             else:
-                st.html('<p class="source-filename"><strong>目前片單：</strong> ' + escape(str(state.filename)) + '</p>')
+                st.html('<p class="source-filename"><strong>目前名單：</strong> ' + escape(str(state.filename)) + '</p>')
                 st.caption(f"{len(state.restaurants)} 筆資料 · {available} 間可抽選 · 僅保留於目前工作階段")
         with action:
             if state.is_default:
@@ -154,8 +151,8 @@ def render_source(state: PickerSession) -> None:
 
 
 def render_filters(state: PickerSession) -> Filters:
-    st.html('<div class="panel-label" id="discover">CUSTOMIZE YOUR NEXT BITE</div>')
-    st.subheader("選擇你的用餐劇情", anchor=False)
+    st.html('<div id="discover"></div>')
+    st.subheader("篩選條件", anchor=False)
     locations = sorted({r.location for r in state.restaurants if r.location}, key=location_label)
     st.selectbox("地點", ["all", *locations], format_func=lambda code: "所有地點" if code == "all" else location_label(code), key="location_choice")
     st.selectbox("食物種類", ["所有種類", *sorted({r.category for r in state.restaurants})], key="category_choice")
@@ -179,18 +176,18 @@ def render_recommendation(state: PickerSession, filters: Filters) -> None:
     candidates = state.candidates(filters)
     available = sum(not r.is_closed for r in candidates)
     current = state.current(filters)
-    st.html('<div class="pick-topline"><span>NOW PICKING</span><span class="live-dot"></span> 今天的主角</div>')
+    st.html('<div class="pick-topline"><span>隨機推薦</span><span>給下一餐一點靈感</span></div>')
     if not available:
-        st.html('<div class="empty-result"><div class="empty-symbol">⌕</div><p class="result-eyebrow">NO MATCH THIS TIME</p><h2>這個劇情，有點挑嘴。</h2><p>目前沒有可推薦的餐廳。<br>試試其他地點、料理或用餐情境。</p></div>')
+        st.html('<div class="empty-result"><div class="empty-symbol" aria-hidden="true">⌕</div><h2>沒有符合條件的餐廳</h2><p>試試其他地點、料理或用餐情境。</p></div>')
     elif current is None:
-        st.html('<div class="empty-result"><div class="dice" aria-hidden="true">⚄</div><p class="result-eyebrow">READY FOR A PLOT TWIST?</p><h2>好吃的，下一秒登場。</h2><p>不用再問「隨便吃什麼」。<br>按下播放，讓命運幫你選一家。</p><div class="empty-tags"><span>隨機驚喜</span><span>不連續重複</span><span>專屬你的篩選</span></div></div>')
+        st.html('<div class="empty-result"><div class="dice" aria-hidden="true">⚄</div><h2>下一餐，交給一點靈感</h2><p>選好條件，按一下就能推薦一家。</p></div>')
     else:
         tags = ''.join(f'<span class="tag">{escape(label)}</span>' for label in feature_labels(current))
         st.html(
             f'<section class="recommendation tone-{poster_tone(current)}" aria-label="餐廳推薦結果">'
             '<div class="result-visual" aria-hidden="true">'
-            f'<span class="result-icon">{food_icon(current)}</span><span class="result-watermark">F</span></div>'
-            '<div class="result-copy"><p class="result-eyebrow">YOUR NEXT FOOD EPISODE</p>'
+            f'<span class="result-icon">{food_icon(current)}</span></div>'
+            '<div class="result-copy"><p class="result-eyebrow">這次推薦給你</p>'
             f'<h2>{escape(current.name)}</h2>'
             f'<div class="result-meta"><strong>{escape(area_label(current))}</strong><span>{escape(current.category)}</span><span>{escape(price_label(current))}</span></div>'
             f'<div class="result-tags">{tags}</div>'
@@ -199,12 +196,11 @@ def render_recommendation(state: PickerSession, filters: Filters) -> None:
         )
         st.link_button("在 Google 地圖查看", map_url(current), icon=":material/map:")
     st.button(
-        "再抽一間，換個劇情" if current else "幫我決定這一餐", on_click=pick_meal,
-        type="primary", icon=":material/play_arrow:", disabled=not available,
+        "再推薦一家" if current else "幫我決定這一餐", on_click=pick_meal,
+        type="primary", icon=":material/shuffle:", disabled=not available,
         width="stretch", key="pick_meal",
     )
     st.caption("目前只有 1 間可抽選，會推薦同一家。" if available == 1 else "每間符合條件的可用店家均等抽選，連續推薦不重複上一間。")
-    st.html('<div class="pick-footer">下一餐的主角，值得好好期待。</div>')
 
 
 def render_rail(title: str, subtitle: str, restaurants: list[Restaurant], key: str) -> None:
@@ -219,11 +215,9 @@ def render_rail(title: str, subtitle: str, restaurants: list[Restaurant], key: s
 
 def render_catalog(state: PickerSession, filters: Filters) -> None:
     candidates = state.candidates(filters)
-    render_rail("最近播放的美食" if state.history else "你的下一餐片單", "左右滑動，探索更多美食", state.history or candidates[:12], "catalog")
     if state.history:
-        render_rail("為你篩選的美食", f"{len(candidates)} 間符合條件 · 顯示前 12 間", candidates[:12], "matches")
-    render_rail("一人食，也值得好好吃", "原表標記適合單人用餐", [r for r in candidates if r.one_person and not r.is_closed][:10], "solo")
-    render_rail("把美食，留給相聚的時刻", "約會與聚餐的用餐靈感", [r for r in candidates if (r.dating or r.gathering) and not r.is_closed][:10], "together")
+        render_rail("最近推薦", "保留最近 3 間不同的推薦", state.history, "recent")
+    render_rail("餐廳名單", f"{len(candidates)} 間符合條件 · 顯示前 {min(len(candidates), 6)} 間", candidates[:6], "catalog")
     if not candidates:
         st.info("沒有符合條件的餐廳，調整上方篩選再試試。")
     with st.expander(f"查看全部符合條件的餐廳（{len(candidates)} 間）"):
@@ -238,17 +232,17 @@ def render_footer(state: PickerSession) -> None:
     with st.container(key="download_panel"):
         text, action = st.columns([2, 1], vertical_alignment="center")
         with text:
-            st.markdown("**把整份美食片單，收藏起來。**")
+            st.markdown("**保留一份餐廳名單。**")
             st.caption("下載你提供的原始 Excel，保留所有地點、料理與用餐標記。")
         with action:
             st.download_button("下載完整名單", DEFAULT_DATA_PATH.read_bytes(), file_name="食物.xlsx", mime=MIME_XLSX, on_click="ignore", icon=":material/download:", width="stretch")
     st.caption("價格以 Excel 的 1–5 等級呈現，未定義對應金額；空白標記代表原表未提供。店家營業狀態、情境與價格未即時查證，出發前請再次確認。")
     st.caption("內建名單供所有訪客使用；你額外匯入的名單僅存於自己的工作階段，重新整理後會恢復內建名單。")
-    st.html('<footer class="site-footer"><div><span class="footer-wordmark">FOODFLIX</span><span>食刻決定 · 把下一餐，變成值得期待的事。</span></div><span>下一餐，現在開播。</span></footer>')
+    st.html('<footer class="site-footer"><span class="footer-wordmark">食刻決定</span><span>好好吃飯，簡單一點。</span></footer>')
 
 
 def main() -> None:
-    st.set_page_config(page_title="FOODFLIX 食刻決定｜你的下一餐，現在開播", page_icon="🍿", layout="wide")
+    st.set_page_config(page_title="食刻決定｜簡單找到下一餐", page_icon="🍽️", layout="wide")
     st.html(ROOT / "static" / "styles.css")
     try:
         state = picker()
@@ -265,7 +259,6 @@ def main() -> None:
     with right:
         with st.container(border=True, key="pick_panel"):
             render_recommendation(state, filters)
-        st.html('<div class="data-legend"><span class="legend-mark">F</span><div><strong>你的偏好，就是推薦的線索。</strong><p>從地點、料理，到一人食或聚餐，所有條件會一起篩選。</p></div></div>')
     render_catalog(state, filters)
     render_footer(state)
 
