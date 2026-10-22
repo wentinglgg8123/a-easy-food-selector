@@ -10,11 +10,25 @@ from zipfile import BadZipFile, ZipFile
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
-from food_picker.catalog import demo_restaurants, parse_rows
+from food_picker.catalog import parse_rows
 from food_picker.models import ParseResult, Restaurant, ValidationError
 
 EXCEL_HEADERS = (
+    "Restaurant",
+    "Location",
+    "Genre",
+    "Price",
+    "OnePerson",
+    "Dating",
+    "Gathering",
+    "FastServe",
+    "SlowEat",
+    "Coordinates",
+    "Comments",
+)
+LEGACY_HEADERS = (
     "餐廳名稱",
     "區域",
     "類型",
@@ -98,23 +112,14 @@ def parse_excel(content: bytes, filename: str) -> ParseResult:
     return parse_rows(rows)
 
 
-def export_restaurants(restaurants: Sequence[Restaurant]) -> bytes:
-    """Export a filtered list; all text cells are literal strings, including '='."""
+def _write_workbook(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> bytes:
+    """Write literal text cells, never spreadsheet formulas or external links."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "餐廳名單"
-    sheet.append(EXCEL_HEADERS)
-    for restaurant in restaurants:
-        values = (
-            restaurant.name,
-            "清大校內" if restaurant.area == "campus" else "校園周邊",
-            restaurant.category,
-            restaurant.price,
-            restaurant.distance,
-            restaurant.address,
-            restaurant.note,
-        )
-        sheet.append(values)
+    sheet.append(tuple(headers))
+    for row in rows:
+        sheet.append(tuple(row))
         for cell in sheet[sheet.max_row]:
             if isinstance(cell.value, str):
                 cell.data_type = "s"
@@ -124,13 +129,17 @@ def export_restaurants(restaurants: Sequence[Restaurant]) -> bytes:
         cell.fill = PatternFill("solid", fgColor="E5EBDD")
         cell.alignment = Alignment(vertical="center")
     sheet.row_dimensions[1].height = 25
-    for column, width in zip("ABCDEFG", (26, 16, 14, 12, 18, 38, 54)):
-        sheet.column_dimensions[column].width = width
+    widths = (30, 21, 22, 12, 14, 12, 14, 14, 14, 43, 54, 16, 14, 18, 38)
+    for index, width in enumerate(widths[:len(headers)], 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    sheet["B1"].comment = Comment("請填寫「校內」或「校外」。", "食刻決定")
-    sheet["D1"].comment = Comment("每人平均消費，以新臺幣數字填寫；不知道時可留白。", "食刻決定")
-    sheet["E1"].comment = Comment("以公里填寫；校外店家超過 2 公里將略過，留白時會顯示提醒。", "食刻決定")
+    sheet["B1"].comment = Comment("保留原始地區代碼，例如 Gongguan、School；不會自動判定清大周邊距離。", "食刻決定")
+    sheet["D1"].comment = Comment("價格級距：請填 1 至 5；這不是新臺幣金額，不知道時可留白。", "食刻決定")
+    for column in "EFGHI":
+        sheet[f"{column}1"].comment = Comment("適合此情境時填 O，不適合或未知時留白。", "食刻決定")
+    sheet["J1"].comment = Comment("緯度, 經度，例如 25.0182, 121.5310；不知道時可留白。", "食刻決定")
+    sheet["K1"].comment = Comment("店家備註會原樣保留；包含「關門了」等歇業提醒的店家不會被推薦。", "食刻決定")
     output = BytesIO()
     try:
         workbook.save(output)
@@ -139,6 +148,45 @@ def export_restaurants(restaurants: Sequence[Restaurant]) -> bytes:
     return output.getvalue()
 
 
+def export_restaurants(restaurants: Sequence[Restaurant]) -> bytes:
+    """Export all catalog fields, preserving raw region/genre codes and old data."""
+    legacy_extensions = any(
+        restaurant.area in ("campus", "nearby")
+        or restaurant.price is not None
+        or restaurant.distance is not None
+        or restaurant.address
+        for restaurant in restaurants
+    )
+    headers = EXCEL_HEADERS + (("區域", "均消", "距離（公里）", "地址") if legacy_extensions else ())
+    rows = []
+    for restaurant in restaurants:
+        coordinates = (
+            f"{restaurant.latitude!r}, {restaurant.longitude!r}"
+            if restaurant.latitude is not None and restaurant.longitude is not None
+            else ""
+        )
+        values = (
+            restaurant.name,
+            restaurant.location,
+            restaurant.genre or restaurant.category,
+            restaurant.price_level,
+            *("O" if value else "" for value in (
+                restaurant.one_person, restaurant.dating, restaurant.gathering,
+                restaurant.fast_serve, restaurant.slow_eat,
+            )),
+            coordinates,
+            restaurant.note,
+        )
+        if legacy_extensions:
+            area = {"campus": "清大校內", "nearby": "校園周邊"}.get(restaurant.area, "")
+            values += (area, restaurant.price, restaurant.distance, restaurant.address)
+        rows.append(values)
+    return _write_workbook(headers, rows)
+
+
 def build_template() -> bytes:
-    """Return eight clearly marked demo rows in the downloadable input format."""
-    return export_restaurants(demo_restaurants())
+    """Return the eleven-column schema with two explicitly fictional examples."""
+    return _write_workbook(EXCEL_HEADERS, [
+        ("示範・一人食堂", "Gongguan", "Bento", 1, "O", "", "", "O", "", "", "虛構示範資料，非真實店家"),
+        ("示範・聚餐小館", "School", "Chinese", 3, "", "O", "O", "", "O", "", "虛構示範資料，非真實店家"),
+    ])

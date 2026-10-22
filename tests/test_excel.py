@@ -8,8 +8,10 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 from food_picker.catalog import demo_restaurants
+from food_picker.defaults import load_default_catalog
 from food_picker.excel import (
     EXCEL_HEADERS,
+    LEGACY_HEADERS,
     MAX_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_BYTES,
     MAX_ZIP_ENTRIES,
@@ -34,15 +36,17 @@ def workbook_bytes(rows, second_sheet=None):
     return buffer.getvalue()
 
 
-def test_template_roundtrip_preserves_demo_data_and_formats():
+def test_template_uses_full_schema_and_clearly_fictional_examples():
     content = build_template()
     result = parse_excel(content, "餐廳.XLSX")
-    expected = demo_restaurants()
-    assert len(result.restaurants) == len(expected) == 8
+    assert len(result.restaurants) == 2
     assert not result.warnings
-    assert [item.name for item in result.restaurants] == [item.name for item in expected]
-    assert [item.price for item in result.restaurants] == [item.price for item in expected]
-    assert [item.distance for item in result.restaurants] == [item.distance for item in expected]
+    assert all(item.name.startswith("示範・") and "虛構" in item.note for item in result.restaurants)
+    assert [item.location for item in result.restaurants] == ["Gongguan", "School"]
+    assert [item.price_level for item in result.restaurants] == [1, 3]
+    assert all(item.price is None for item in result.restaurants)
+    assert result.restaurants[0].one_person and result.restaurants[0].fast_serve
+    assert result.restaurants[1].dating and result.restaurants[1].gathering and result.restaurants[1].slow_eat
     with BytesIO(content) as stream:
         workbook = load_workbook(stream)
         sheet = workbook.active
@@ -55,14 +59,14 @@ def test_template_roundtrip_preserves_demo_data_and_formats():
 
 def test_only_first_sheet_is_imported():
     content = workbook_bytes(
-        [EXCEL_HEADERS, ["第一間", "校內", "中式", 80]],
-        [EXCEL_HEADERS, ["不應出現", "校內", "中式", 90]],
+        [LEGACY_HEADERS, ["第一間", "校內", "中式", 80]],
+        [LEGACY_HEADERS, ["不應出現", "校內", "中式", 90]],
     )
     assert [item.name for item in parse_excel(content, "餐廳.xlsx").restaurants] == ["第一間"]
 
 
 def test_empty_first_sheet_does_not_fall_back_to_second():
-    content = workbook_bytes([], [EXCEL_HEADERS, ["第二間", "校內"]])
+    content = workbook_bytes([], [LEGACY_HEADERS, ["第二間", "校內"]])
     with pytest.raises(ValidationError, match="沒有資料"):
         parse_excel(content, "餐廳.xlsx")
 
@@ -71,7 +75,7 @@ def test_import_keeps_excel_row_numbers_and_domain_warnings():
     content = workbook_bytes(
         [
             [],
-            EXCEL_HEADERS,
+            LEGACY_HEADERS,
             ["可用", "校內", "中式", 80],
             ["過遠", "校外", "中式", 100, 2.1],
             ["未確認距離", "校外", "中式", 100],
@@ -86,7 +90,7 @@ def test_import_keeps_excel_row_numbers_and_domain_warnings():
 def test_formulas_are_not_replaced_by_cached_values():
     content = workbook_bytes(
         [
-            EXCEL_HEADERS,
+            LEGACY_HEADERS,
             ["可用", "校內", "中式", 80],
             ["公式價錢", "校內", "中式", "=SUM(40,40)"],
             ["=CONCAT(\"公式名稱\")", "校內", "中式", 90],
@@ -163,7 +167,7 @@ def test_decompression_size_is_bounded_before_loading():
 @pytest.mark.parametrize("row,column,expected", [(10_001, 1, "10,000"), (1, 33, "32 欄")])
 def test_worksheet_dimensions_are_bounded(row, column, expected):
     workbook = Workbook()
-    workbook.active.append(EXCEL_HEADERS)
+    workbook.active.append(LEGACY_HEADERS)
     workbook.active.append(["可用", "校內"])
     workbook.active.cell(row, column, "超出範圍")
     buffer = BytesIO()
@@ -174,7 +178,7 @@ def test_worksheet_dimensions_are_bounded(row, column, expected):
 
 
 def test_domain_restaurant_limit_still_applies_to_real_workbook():
-    content = workbook_bytes([EXCEL_HEADERS] + [[f"店家{number}", "校內"] for number in range(5001)])
+    content = workbook_bytes([LEGACY_HEADERS] + [[f"店家{number}", "校內"] for number in range(5001)])
     with pytest.raises(ValidationError, match="5,000"):
         parse_excel(content, "餐廳.xlsx")
 
@@ -183,6 +187,33 @@ def test_export_contains_only_requested_restaurants():
     selected = demo_restaurants()[2:4]
     result = parse_excel(export_restaurants(selected), "已篩選.xlsx")
     assert [item.name for item in result.restaurants] == [item.name for item in selected]
+
+
+def test_export_roundtrip_preserves_all_bundled_catalog_fields():
+    original = load_default_catalog().restaurants
+    imported = parse_excel(export_restaurants(original), "完整餐廳.xlsx").restaurants
+    assert len(original) == len(imported) == 176
+    assert imported == original
+
+
+def test_export_preserves_legacy_amount_distance_address_and_area():
+    original = demo_restaurants()
+    imported = parse_excel(export_restaurants(original), "舊格式匯出.xlsx").restaurants
+    for before, after in zip(original, imported, strict=True):
+        assert (after.name, after.area, after.category, after.price, after.distance, after.address, after.note) == (
+            before.name, before.area, before.category, before.price, before.distance, before.address, before.note
+        )
+        assert after.price_level is None
+
+
+def test_export_preserves_rich_and_legacy_records_in_the_same_workbook():
+    original = [load_default_catalog().restaurants[0], demo_restaurants()[4]]
+    imported = parse_excel(export_restaurants(original), "混合名單.xlsx").restaurants
+    assert len(imported) == 2
+    assert imported[0] == original[0]
+    assert imported[1].price == original[1].price
+    assert imported[1].distance == original[1].distance
+    assert imported[1].area == original[1].area
 
 
 def test_exported_untrusted_strings_are_literal_cells():
@@ -198,8 +229,8 @@ def test_exported_untrusted_strings_are_literal_cells():
     for coordinate, expected in (
         ("A2", restaurant.name),
         ("C2", restaurant.category),
-        ("F2", restaurant.address),
-        ("G2", restaurant.note),
+        ("O2", restaurant.address),
+        ("K2", restaurant.note),
     ):
         assert sheet[coordinate].value == expected
         assert sheet[coordinate].data_type == "s"

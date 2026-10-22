@@ -3,7 +3,7 @@
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-Area = Literal["campus", "nearby"]
+Area = Literal["campus", "nearby", "other"]
 
 
 class ValidationError(ValueError):
@@ -20,6 +20,17 @@ class Restaurant:
     distance: float | None
     address: str
     note: str
+    location: str = ""
+    genre: str = ""
+    price_level: int | None = None
+    one_person: bool = False
+    dating: bool = False
+    gathering: bool = False
+    fast_serve: bool = False
+    slow_eat: bool = False
+    latitude: float | None = None
+    longitude: float | None = None
+    is_closed: bool = False
 
     def to_dict(self) -> dict[str, object]:
         """Return plain values suitable for JSON and spreadsheet exports."""
@@ -28,10 +39,18 @@ class Restaurant:
 
 @dataclass(frozen=True)
 class Filters:
-    area: Literal["all", "campus", "nearby"] = "all"
+    area: Literal["all", "campus", "nearby", "other"] = "all"
     category: str = "all"
     max_price: float | None = None
     query: str = ""
+    location: str = "all"
+    max_price_level: int | None = None
+    one_person: bool = False
+    dating: bool = False
+    gathering: bool = False
+    fast_serve: bool = False
+    slow_eat: bool = False
+    include_closed: bool = False
 
 
 @dataclass(frozen=True)

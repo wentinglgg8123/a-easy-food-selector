@@ -11,6 +11,44 @@ import unicodedata
 from .models import Area, Filters, ParseResult, Restaurant, ValidationError
 
 MAX_DATA_ROWS = 5_000
+LOCATION_LABELS = {
+    "Gongguan": "公館",
+    "Heping118": "和平 118 巷",
+    "Liuzhangli": "六張犁",
+    "NTUMed": "臺大醫學院",
+    "NTUST": "臺灣科技大學",
+    "School": "校內（原名單）",
+    "Shida": "師大",
+    "XinshengSouth": "新生南路",
+}
+GENRE_LABELS = {
+    "Bento": "便當",
+    "Chinese": "中式料理",
+    "Japanese": "日式料理",
+    "Noodles": "麵食",
+    "Ramen": "拉麵",
+    "SouthEastAsian": "東南亞料理",
+    "Dessert": "甜點",
+    "Steak": "牛排",
+    "Light": "輕食",
+    "Italian": "義式料理",
+    "Cafe": "咖啡廳",
+    "HotPot": "火鍋",
+    "FastFood": "速食",
+    "HongKong": "港式料理",
+    "Buffet": "自助餐",
+    "Korean": "韓式料理",
+    "American": "美式料理",
+    "Vegetarian": "蔬食",
+    "BreakfastBrunch": "早午餐",
+    "French": "法式料理",
+    "LouMei": "滷味",
+    "Exotic": "異國料理",
+    "Bar": "酒吧",
+    "Breakfast": "早餐",
+    "Indian": "印度料理",
+}
+FLAG_COLUMNS = ("one_person", "dating", "gathering", "fast_serve", "slow_eat")
 COLUMN_NAMES = {
     "name": "餐廳名稱",
     "area": "區域",
@@ -19,6 +57,15 @@ COLUMN_NAMES = {
     "distance": "距離（公里）",
     "address": "地址",
     "note": "備註",
+    "location": "Location（地點）",
+    "genre": "Genre（料理類型）",
+    "price_level": "Price（價位等級）",
+    "one_person": "OnePerson（一人用餐）",
+    "dating": "Dating（約會）",
+    "gathering": "Gathering（聚餐）",
+    "fast_serve": "FastServe（快速用餐）",
+    "slow_eat": "SlowEat（慢慢享用）",
+    "coordinates": "Coordinates（座標）",
 }
 COLUMN_ALIASES = {
     "name": ("餐廳名稱", "店家名稱", "餐廳", "店名", "名稱", "name", "restaurant name"),
@@ -29,7 +76,10 @@ COLUMN_ALIASES = {
     "address": ("地址", "住址", "address"),
     "note": ("備註", "說明", "note", "notes"),
 }
-TEXT_LIMITS = {"name": 200, "area": 80, "category": 80, "address": 500, "note": 2_000}
+TEXT_LIMITS = {
+    "name": 200, "area": 80, "category": 80, "address": 500, "note": 2_000,
+    "location": 80, "genre": 80,
+}
 _NUMBER = re.compile(r"(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)", re.ASCII)
 
 
@@ -41,11 +91,48 @@ def _header_key(value: str) -> str:
     return re.sub(r"[\s_\-()/]", "", _normalise(value))
 
 
+def _label(code: str, labels: dict[str, str], fallback: str) -> str:
+    key = _normalise(code)
+    return next((label for original, label in labels.items() if _normalise(original) == key), code.strip() or fallback)
+
+
+def location_label(code: str) -> str:
+    """Localize known source codes while preserving unrecognized locations."""
+    return _label(code, LOCATION_LABELS, "未提供地點")
+
+
+def genre_label(code: str) -> str:
+    """Localize known source codes without guessing unfamiliar cuisines."""
+    return _label(code, GENRE_LABELS, "未分類")
+
+
 _HEADER_COLUMNS = {
     _header_key(alias): column
     for column, aliases in COLUMN_ALIASES.items()
     for alias in aliases
 }
+_RICH_COLUMN_ALIASES = {
+    "name": ("Restaurant",),
+    "location": ("Location",),
+    "genre": ("Genre",),
+    "price_level": ("Price", "PriceLevel"),
+    "one_person": ("OnePerson",),
+    "dating": ("Dating",),
+    "gathering": ("Gathering",),
+    "fast_serve": ("FastServe",),
+    "slow_eat": ("SlowEat",),
+    "coordinates": ("Coordinates",),
+    "note": ("Comments",),
+}
+_RICH_HEADER_COLUMNS = {
+    **_HEADER_COLUMNS,
+    **{
+        _header_key(alias): column
+        for column, aliases in _RICH_COLUMN_ALIASES.items()
+        for alias in aliases
+    },
+}
+_RICH_MARKERS = {"restaurant", "location", "genre", "oneperson", "dating", "gathering", "fastserve", "sloweat", "coordinates", "comments", "pricelevel"}
 _CAMPUS = {
     "校內", "學餐", "校內學餐", "清大校內", "清華校內", "清華大學校內",
     "國立清華大學校內", "campus", "oncampus",
@@ -64,9 +151,11 @@ def _is_row(value: object) -> bool:
     return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
 
 
-def _validate_cell(value: object) -> None:
+def _validate_cell(value: object, *, allow_bool: bool = False) -> None:
     """Reject executable formulas and unsupported Excel cell types in any column."""
     if _blank(value):
+        return
+    if allow_bool and isinstance(value, bool):
         return
     if isinstance(value, str):
         if _normalise(value).startswith("="):
@@ -127,7 +216,65 @@ def _area(value: object) -> Area:
         return "campus"
     if key in _NEARBY:
         return "nearby"
+    if key in {"other", "其他", "一般名單"}:
+        return "other"
     raise ValidationError("「區域」請填寫「校內」或「校外」，已略過")
+
+
+def _price_level(value: object) -> int | None:
+    if _blank(value):
+        return None
+    message = "「Price」必須是 1 到 5 的整數價位等級，不代表新台幣金額，已略過"
+    if isinstance(value, str):
+        value = unicodedata.normalize("NFKC", value).strip()
+        if not re.fullmatch(r"\d+(?:\.0+)?", value, flags=re.ASCII):
+            raise ValidationError(message)
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        number = math.nan
+    if isinstance(value, bool) or not math.isfinite(number) or not number.is_integer() or not 1 <= number <= 5:
+        raise ValidationError(message)
+    return int(number)
+
+
+def _flag(value: object, column: str) -> bool:
+    if _blank(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        key = _normalise(value)
+        if key in {"o", "○", "✓", "✔", "yes", "true", "1", "是"}:
+            return True
+        if key in {"no", "false", "0", "否"}:
+            return False
+    raise ValidationError(f"「{COLUMN_NAMES[column]}」請填 O、○、✓、yes、true、1，或留白表示否，已略過")
+
+
+def _coordinates(value: object) -> tuple[float | None, float | None]:
+    if _blank(value):
+        return None, None
+    message = "「Coordinates」格式或範圍無效，請填「緯度, 經度」；已保留餐廳但不提供座標地圖"
+    if not isinstance(value, str):
+        raise ValidationError(message)
+    parts = unicodedata.normalize("NFKC", value).split(",")
+    if len(parts) != 2:
+        raise ValidationError(message)
+    try:
+        latitude, longitude = (float(part.strip()) for part in parts)
+    except (ValueError, OverflowError):
+        raise ValidationError(message) from None
+    if not math.isfinite(latitude) or not math.isfinite(longitude) or not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValidationError(message)
+    return latitude, longitude
+
+
+def _closed(note: str) -> bool:
+    text = re.sub(r"\s", "", _normalise(note)).strip("。.!！")
+    return text in {"閉店", "已閉店", "關門了", "已關門", "已歇業", "永久歇業"}
 
 
 def parse_rows(rows: Sequence[Sequence[object]]) -> ParseResult:
@@ -153,15 +300,18 @@ def parse_rows(rows: Sequence[Sequence[object]]) -> ParseResult:
     if nonempty_count > MAX_DATA_ROWS:
         raise ValidationError(f"Excel 最多支援 {MAX_DATA_ROWS:,} 筆餐廳資料，請分割檔案後重新匯入。")
 
+    rich_schema = any(isinstance(value, str) and _header_key(value) in _RICH_MARKERS for value in header)
+    header_columns = _RICH_HEADER_COLUMNS if rich_schema else _HEADER_COLUMNS
     columns: dict[str, int] = {}
     for index, value in enumerate(header):
-        column = _HEADER_COLUMNS.get(_header_key(value)) if isinstance(value, str) else None
+        column = header_columns.get(_header_key(value)) if isinstance(value, str) else None
         if column is None:
             continue
         if column in columns:
             raise ValidationError(f"欄位「{COLUMN_NAMES[column]}」出現多次，請保留一欄後重新匯入。")
         columns[column] = index
-    missing = [f"「{COLUMN_NAMES[column]}」" for column in ("name", "area") if column not in columns]
+    required_columns = ("name", "location", "genre") if rich_schema else ("name", "area")
+    missing = [f"「{COLUMN_NAMES[column]}」" for column in required_columns if column not in columns]
     if missing:
         raise ValidationError(f"缺少必要欄位：{'、'.join(missing)}。請將欄位名稱放在第一個有資料的列。")
 
@@ -184,26 +334,42 @@ def parse_rows(rows: Sequence[Sequence[object]]) -> ParseResult:
             return row[index] if index is not None and index < len(row) else None
 
         try:
-            for value in row:
-                _validate_cell(value)
+            flag_indexes = {columns[column] for column in FLAG_COLUMNS if column in columns} if rich_schema else set()
+            for index, value in enumerate(row):
+                _validate_cell(value, allow_bool=index in flag_indexes)
             name = _text(cell("name"), "name")
             if not name:
                 raise ValidationError("缺少餐廳名稱，請補上名稱，已略過")
-            area = _area(cell("area"))
+            area = _area(cell("area")) if not rich_schema or not _blank(cell("area")) else "other"
             price = _number(cell("price"), "price")
             distance = _number(cell("distance"), "distance")
             if area == "nearby" and distance is not None and distance > 2:
                 raise ValidationError("校外餐廳超過 2 公里範圍，請確認距離單位為公里，已略過")
             address = _text(cell("address"), "address")
-            category = _text(cell("category"), "category") or "未分類"
+            location = _text(cell("location"), "location") if rich_schema else ""
+            genre = _text(cell("genre"), "genre") if rich_schema else ""
+            category = genre_label(genre) if rich_schema else _text(cell("category"), "category") or "未分類"
             note = _text(cell("note"), "note")
-            key = json.dumps([_normalise(name), _normalise(address), area], ensure_ascii=False)
+            price_level = _price_level(cell("price_level")) if rich_schema else None
+            flags = {column: _flag(cell(column), column) for column in FLAG_COLUMNS} if rich_schema else {}
+            latitude, longitude = None, None
+            if rich_schema:
+                try:
+                    latitude, longitude = _coordinates(cell("coordinates"))
+                except ValidationError as error:
+                    warn(str(error), row_number)
+            identity = [_normalise(name), _normalise(location), latitude, longitude] if rich_schema else [_normalise(name), _normalise(address), area]
+            key = json.dumps(identity, ensure_ascii=False)
             if key in seen:
-                warn("相同名稱、地址與區域的餐廳重複，已保留第一筆", row_number)
+                warn("相同名稱、地點與座標的餐廳重複，已保留第一筆" if rich_schema else "相同名稱、地址與區域的餐廳重複，已保留第一筆", row_number)
                 continue
             seen.add(key)
             restaurant_id = f"restaurant-{sha256(key.encode()).hexdigest()[:20]}"
-            restaurants.append(Restaurant(restaurant_id, name, area, category, price, distance, address, note))
+            restaurants.append(Restaurant(
+                restaurant_id, name, area, category, price, distance, address, note,
+                location=location, genre=genre, price_level=price_level,
+                latitude=latitude, longitude=longitude, is_closed=_closed(note), **flags,
+            ))
             if area == "nearby" and distance is None:
                 warn("校外餐廳未填距離，已匯入但尚未確認是否在 2 公里內；請補上「距離（公里）」", row_number)
         except ValidationError as error:
@@ -224,17 +390,26 @@ def filter_restaurants(restaurants: Sequence[Restaurant], filters: Filters) -> l
     query = _normalise(filters.query)
     result = []
     for restaurant in restaurants:
+        if restaurant.is_closed and not filters.include_closed:
+            continue
         if restaurant.area == "nearby" and restaurant.distance is not None:
             if not math.isfinite(restaurant.distance) or not 0 <= restaurant.distance <= 2:
                 continue
         if filters.area != "all" and restaurant.area != filters.area:
             continue
-        if filters.category != "all" and _normalise(restaurant.category) != _normalise(filters.category):
+        if filters.category != "all" and _normalise(filters.category) not in {_normalise(restaurant.category), _normalise(restaurant.genre)}:
+            continue
+        if filters.location != "all" and _normalise(filters.location) != _normalise(restaurant.location):
+            continue
+        if filters.max_price_level is not None and (restaurant.price_level is None or restaurant.price_level > filters.max_price_level):
+            continue
+        if any(getattr(filters, column) and not getattr(restaurant, column) for column in FLAG_COLUMNS):
             continue
         if filters.max_price is not None:
             if restaurant.price is None or not math.isfinite(restaurant.price) or restaurant.price > filters.max_price:
                 continue
-        if query and not any(query in _normalise(value) for value in (restaurant.name, restaurant.address, restaurant.category)):
+        searchable = (restaurant.name, restaurant.address, restaurant.category, restaurant.genre, restaurant.location, location_label(restaurant.location), restaurant.note)
+        if query and not any(query in _normalise(value) for value in searchable):
             continue
         result.append(restaurant)
     return result

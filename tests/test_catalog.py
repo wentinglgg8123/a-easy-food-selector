@@ -2,11 +2,21 @@
 
 from dataclasses import FrozenInstanceError, replace
 from datetime import date, datetime
+from pathlib import Path
 import random
 
 import pytest
 
-from food_picker.catalog import choose_restaurant, demo_restaurants, filter_restaurants, parse_rows
+from food_picker.catalog import (
+    GENRE_LABELS,
+    LOCATION_LABELS,
+    choose_restaurant,
+    demo_restaurants,
+    filter_restaurants,
+    genre_label,
+    location_label,
+    parse_rows,
+)
 from food_picker.models import Filters, ValidationError
 
 
@@ -139,3 +149,169 @@ def test_demo_catalog_is_fresh_and_explicitly_fictional():
     assert all("示範" in restaurant.name and "非真實店家名單" in restaurant.note for restaurant in restaurants)
     restaurants.clear()
     assert len(demo_restaurants()) == 8
+
+
+RICH_HEADERS = [
+    "Restaurant", "Location", "Genre", "Price", "OnePerson", "Dating",
+    "Gathering", "FastServe", "SlowEat", "Coordinates", "Comments",
+]
+
+
+def test_rich_schema_retains_all_fields_and_keeps_tiers_separate_from_currency():
+    result = parse_rows([
+        RICH_HEADERS,
+        ["牛排館", "Gongguan", "Steak", 4.0, "O", True, "○", "✓", 1, "25.018, 121.531", "學生優惠"],
+    ])
+    restaurant = result.restaurants[0]
+    assert restaurant.area == "other"
+    assert (restaurant.location, restaurant.genre, restaurant.category) == ("Gongguan", "Steak", "牛排")
+    assert restaurant.price_level == 4 and restaurant.price is None
+    assert all((restaurant.one_person, restaurant.dating, restaurant.gathering, restaurant.fast_serve, restaurant.slow_eat))
+    assert (restaurant.latitude, restaurant.longitude) == (25.018, 121.531)
+    assert restaurant.note == "學生優惠" and not restaurant.is_closed
+    assert result.warnings == []
+
+
+@pytest.mark.parametrize("value, expected", [(1, 1), (5.0, 5), ("３", 3), ("2.0", 2), (None, None), ("", None)])
+def test_price_levels_are_optional_integral_values_from_one_to_five(value, expected):
+    restaurant = parse_rows([RICH_HEADERS, ["餐廳", "School", "Bento", value]]).restaurants[0]
+    assert restaurant.price_level == expected
+    assert restaurant.price is None
+
+
+@pytest.mark.parametrize("value", [0, 6, 2.5, True, "NT$ 2", "1e0", "-1", "2-3"])
+def test_invalid_price_level_skips_only_the_affected_restaurant(value):
+    result = parse_rows([RICH_HEADERS, ["無效", "Gongguan", "Ramen", value], ["有效", "Gongguan", "Ramen", 2]])
+    assert [restaurant.name for restaurant in result.restaurants] == ["有效"]
+    assert "第 2 列" in result.warnings[0]
+
+
+@pytest.mark.parametrize("value", ["bad coordinates", "91,121", "25,181", "nan,121", "25,121,22", 123])
+def test_invalid_coordinates_warn_but_preserve_the_restaurant(value):
+    row = ["餐廳", "Gongguan", "Ramen", 2, None, None, None, None, None, value]
+    result = parse_rows([RICH_HEADERS, row])
+    assert len(result.restaurants) == 1
+    assert result.restaurants[0].latitude is None
+    assert result.restaurants[0].longitude is None
+    assert len(result.warnings) == 1 and "已保留餐廳" in result.warnings[0]
+
+
+def test_blank_coordinates_are_allowed_without_a_warning():
+    result = parse_rows([RICH_HEADERS, ["餐廳", "School", "Bento", None]])
+    assert result.restaurants[0].latitude is None
+    assert result.warnings == []
+
+
+def test_rich_schema_validates_flags_and_does_not_allow_booleans_in_other_columns():
+    result = parse_rows([
+        RICH_HEADERS,
+        ["一人食", "Gongguan", "Ramen", 1, "yes", "false", 0, None, False],
+        ["無效標記", "Gongguan", "Ramen", 1, "maybe"],
+        ["布林名稱", "Gongguan", True, 1],
+    ])
+    restaurant, = result.restaurants
+    assert restaurant.one_person and not restaurant.dating and not restaurant.gathering
+    assert not restaurant.fast_serve and not restaurant.slow_eat
+    assert len(result.warnings) == 2
+    assert any("OnePerson" in warning for warning in result.warnings)
+
+
+def test_rich_schema_rejects_formulas_in_coordinates_and_comments():
+    result = parse_rows([
+        RICH_HEADERS,
+        ["座標公式", "Gongguan", "Ramen", 2, None, None, None, None, None, "=A1"],
+        ["備註公式", "Gongguan", "Ramen", 2, None, None, None, None, None, None, "=A1"],
+        ["有效餐廳", "Gongguan", "Ramen", 2],
+    ])
+    assert [restaurant.name for restaurant in result.restaurants] == ["有效餐廳"]
+    assert len(result.warnings) == 1 and "第 2、3 列" in result.warnings[0]
+
+
+def test_rich_schema_requires_location_and_genre_headers():
+    with pytest.raises(ValidationError, match="Genre"):
+        parse_rows([["Restaurant", "Location"], ["餐廳", "Gongguan"]])
+    with pytest.raises(ValidationError, match="Location"):
+        parse_rows([["Restaurant", "Genre"], ["餐廳", "Ramen"]])
+
+
+def test_unknown_codes_fall_back_without_inventing_a_location_or_cuisine():
+    restaurant = parse_rows([RICH_HEADERS, ["餐廳", "NewTown", "NewCuisine", 2]]).restaurants[0]
+    assert restaurant.location == "NewTown" and restaurant.category == "NewCuisine"
+    assert location_label(restaurant.location) == "NewTown"
+    assert genre_label(restaurant.genre) == "NewCuisine"
+    assert genre_label("") == "未分類"
+
+
+def test_rich_deduplication_keeps_distinct_branches():
+    rows = [
+        ["同名店", "Gongguan", "Ramen", 1, None, None, None, None, None, "25.01,121.53"],
+        ["同名店", "Gongguan", "Ramen", 1, None, None, None, None, None, "25.02,121.53"],
+        ["同名店", "Shida", "Ramen", 1, None, None, None, None, None, "25.01,121.53"],
+    ]
+    result = parse_rows([RICH_HEADERS, *rows, rows[0]])
+    assert len(result.restaurants) == 3
+    assert len({restaurant.id for restaurant in result.restaurants}) == 3
+    assert len(result.warnings) == 1 and "重複" in result.warnings[0]
+
+
+def test_rich_schema_can_round_trip_optional_legacy_currency_and_distance_fields():
+    result = parse_rows([
+        [*RICH_HEADERS, "均消", "距離（公里）", "地址", "區域"],
+        ["校內店家", "", "中式", None, None, None, None, None, None, None, "原始備註", 100, None, "清大校內", "campus"],
+    ])
+    restaurant = result.restaurants[0]
+    assert restaurant.area == "campus" and restaurant.price == 100
+    assert restaurant.price_level is None and restaurant.address == "清大校內"
+    assert restaurant.category == "中式" and restaurant.note == "原始備註"
+
+
+def test_new_filters_combine_and_closed_restaurants_are_opt_in():
+    restaurants = parse_rows([
+        RICH_HEADERS,
+        ["全部符合", "Gongguan", "Ramen", 2, "O", "O", "O", "O", "O"],
+        ["少一條件", "Gongguan", "Ramen", 2, "O", "O", "O", "O", None],
+        ["已關門", "Gongguan", "Ramen", 1, "O", "O", "O", "O", "O", None, "關門了"],
+        ["未知價位", "Gongguan", "Ramen", None, "O", "O", "O", "O", "O"],
+        ["不同地點", "Shida", "Ramen", 1, "O", "O", "O", "O", "O"],
+    ]).restaurants
+    filters = Filters(location="Gongguan", category="Ramen", max_price_level=2,
+                      one_person=True, dating=True, gathering=True, fast_serve=True, slow_eat=True)
+    assert [restaurant.name for restaurant in filter_restaurants(restaurants, filters)] == ["全部符合"]
+    included = filter_restaurants(restaurants, replace(filters, include_closed=True))
+    assert [restaurant.name for restaurant in included] == ["全部符合", "已關門"]
+    assert len(filter_restaurants(restaurants, Filters(query="公館"))) == 3
+    assert len(filter_restaurants(restaurants, Filters(query="gongguan"))) == 3
+    assert len(filter_restaurants(restaurants, Filters(query="拉麵"))) == 4
+    assert filter_restaurants(restaurants, Filters(max_price=100)) == []
+
+
+def test_bundled_workbook_retains_all_rows_codes_and_fields():
+    from openpyxl import load_workbook
+
+    path = Path(__file__).resolve().parents[1] / "data" / "food.xlsx"
+    if not path.is_file():
+        pytest.skip("The user-supplied workbook has not been copied into data/food.xlsx yet")
+    with path.open("rb") as source:
+        workbook = load_workbook(source, read_only=True, data_only=False)
+        try:
+            result = parse_rows(list(workbook.active.iter_rows(values_only=True)))
+        finally:
+            workbook.close()
+    restaurants = result.restaurants
+    assert len(restaurants) == 176
+    assert len({restaurant.location for restaurant in restaurants}) == 8
+    assert len({restaurant.genre for restaurant in restaurants}) == 25
+    assert {restaurant.location for restaurant in restaurants} == set(LOCATION_LABELS)
+    assert {restaurant.genre for restaurant in restaurants} == set(GENRE_LABELS)
+    assert all(restaurant.area == "other" and restaurant.price is None for restaurant in restaurants)
+    assert all(restaurant.latitude is not None and restaurant.longitude is not None for restaurant in restaurants)
+    assert sum(restaurant.price_level is None for restaurant in restaurants) == 4
+    assert sum(restaurant.one_person for restaurant in restaurants) == 163
+    assert sum(restaurant.dating for restaurant in restaurants) == 4
+    assert sum(restaurant.gathering for restaurant in restaurants) == 24
+    assert sum(restaurant.fast_serve for restaurant in restaurants) == 14
+    assert sum(restaurant.slow_eat for restaurant in restaurants) == 8
+    closed = [restaurant for restaurant in restaurants if restaurant.is_closed]
+    assert [restaurant.name for restaurant in closed] == ["郭董麻辣牛肉麵"]
+    assert len(filter_restaurants(restaurants, Filters())) == 175
+    assert result.warnings == []
