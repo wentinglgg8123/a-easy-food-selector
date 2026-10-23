@@ -6,6 +6,14 @@ from urllib.parse import urlencode
 from .catalog import location_label
 from .models import Restaurant
 
+PRICE_RANGES = {
+    1: "NT$0–100",
+    2: "NT$100–200",
+    3: "NT$200–300",
+    4: "NT$300–500",
+    5: "NT$500以上",
+}
+
 GENRE_ICONS = {
     "Steak": "🥩", "SouthEastAsian": "🍛", "Ramen": "🍜", "Noodles": "🍜",
     "LouMei": "🥘", "Light": "🥗", "Korean": "🍲", "Japanese": "🍣",
@@ -37,10 +45,28 @@ def number_label(value: float) -> str:
     return f"{number:,.0f}" if number.is_integer() else f"{number:,.2f}".rstrip("0").rstrip(".")
 
 
+def coin_label(level: int | None) -> str:
+    """Display the existing source level without changing its stored value."""
+    if isinstance(level, int) and not isinstance(level, bool) and level in PRICE_RANGES:
+        return "🪙" * level
+    return "價格未提供"
+
+
 def price_label(restaurant: Restaurant) -> str:
-    if restaurant.price_level is not None:
-        return f"價格等級 {restaurant.price_level} / 5"
-    return f"NT$ {number_label(restaurant.price)}" if restaurant.price is not None else "價格未分級"
+    if restaurant.price_level in PRICE_RANGES:
+        return f"{coin_label(restaurant.price_level)} · {PRICE_RANGES[restaurant.price_level]}"
+    return f"NT$ {number_label(restaurant.price)}" if restaurant.price is not None else "價格未提供"
+
+
+def price_legend_html() -> str:
+    """Explain the requested coin ranges without suggesting a precise meal price."""
+    items = ''.join(
+        '<span class="price-legend-item" role="listitem">'
+        f'<span class="price-legend-coins" aria-label="{level} 枚金幣">{coin_label(level)}</span>'
+        f'<span>{escape(price_range)}</span></span>'
+        for level, price_range in PRICE_RANGES.items()
+    )
+    return f'<div class="price-legend" role="list" aria-label="金幣價格範圍說明">{items}</div>'
 
 
 def distance_label(restaurant: Restaurant) -> str:
@@ -111,7 +137,7 @@ def restaurant_card(restaurant: Restaurant, index: int = 0) -> str:
 def table_rows(restaurants: list[Restaurant]) -> list[dict[str, object]]:
     return [
         {"餐廳名稱": r.name, "地點": area_label(r), "食物種類": r.category,
-         "價格等級": r.price_level, "一個人吃": r.one_person, "約會": r.dating,
+         "價格": price_label(r), "一個人吃": r.one_person, "約會": r.dating,
          "聚餐": r.gathering, "快速上菜": r.fast_serve, "慢慢享用": r.slow_eat,
          "緯度": r.latitude, "經度": r.longitude, "Google 地圖": map_url(r),
          "備註": r.note, "原表註記歇業": r.is_closed,

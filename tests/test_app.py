@@ -37,7 +37,7 @@ def test_initial_page_loads_real_catalog_for_every_visitor(app):
     assert len(app.pills(key="category_choices").options) == 25
     assert len(app.selectbox) == 0 and len(app.multiselect) == 0
     assert len(app.pills) == 5
-    assert any("FOODFLIX" in element.value for element in app.get("html"))
+    assert not any("FOODFLIX" in element.value for element in app.get("html"))
 
 
 def test_pick_renders_real_recommendation_without_consecutive_repeats(app):
@@ -150,7 +150,7 @@ def test_empty_search_disables_pick_and_reset_clears_every_filter(app):
     app.text_input(key="query_choice").set_value("不存在的餐廳").run()
     assert not app.exception
     assert names(app) == [] and app.button(key="pick_meal").disabled
-    next(button for button in app.button if button.label == "重設篩選").click().run()
+    app.button(key="clear_all_filters").click().run()
     assert not app.exception
     assert app.pills(key="location_choices").value == []
     assert app.pills(key="category_choices").value == []
@@ -212,3 +212,67 @@ def test_complete_table_provides_named_google_maps_links(app):
     assert "孫東寶牛排" in query and "公館" in query
     config = json.loads(app.dataframe[0].proto.columns)
     assert config["Google 地圖"]["type_config"]["type"] == "link"
+
+
+def test_each_filter_group_can_select_all_and_clear_without_affecting_other_groups(app):
+    groups = {
+        "location_choices": 8,
+        "category_choices": 25,
+        "price_choices": 5,
+        "occasion_choice": 3,
+        "pace_choice": 2,
+    }
+    for key, option_count in groups.items():
+        app.button(key=f"select_all_{key}").click().run()
+        assert not app.exception
+        assert len(app.pills(key=key).value) == option_count
+        for other_key in groups.keys() - {key}:
+            assert app.pills(key=other_key).value == []
+        app.button(key=f"clear_{key}").click().run()
+        assert not app.exception
+        assert app.pills(key=key).value == []
+        assert len(names(app)) == 175
+
+
+def test_coin_prices_have_the_range_legend_and_readable_table_values(app):
+    displayed = [option.content or option.content_icon for option in app.pills(key="price_choices").proto.options]
+    assert displayed == ["🪙" * level for level in range(1, 6)]
+    legend = next(html.value for html in app.get("html") if "price-legend" in html.value)
+    for price_range in ("0–100", "100–200", "200–300", "300–500", "500以上"):
+        assert price_range in legend
+    table = app.dataframe[0].value
+    assert table.iloc[0]["價格"] == "🪙 · NT$0–100"
+    assert "價格等級" not in table.columns
+
+
+def test_catalog_pagination_exposes_six_comment_forms_per_page(app):
+    assert app.session_state["catalog_page"] == 0
+    assert app.button(key="catalog_previous").disabled
+    first_cards = [html.value for html in app.get("html") if '<article class="food-card' in html.value]
+    assert len(first_cards) == 6 and "孫東寶牛排" in first_cards[0]
+    assert len([field for field in app.text_area if field.key.startswith("review_body_")]) == 6
+    submit_buttons = [button for button in app.button if (button.key or "").startswith("review_submit_")]
+    assert len(submit_buttons) == 6 and all(button.disabled for button in submit_buttons)
+
+    app.button(key="catalog_next").click().run()
+    assert not app.exception
+    assert app.session_state["catalog_page"] == 1
+    second_cards = [html.value for html in app.get("html") if '<article class="food-card' in html.value]
+    assert len(second_cards) == 6 and "泰好吃泰國船麵" in second_cards[0]
+    assert "孫東寶牛排" not in " ".join(second_cards)
+    assert len([field for field in app.text_area if field.key.startswith("review_body_")]) == 6
+    assert not app.button(key="catalog_previous").disabled
+    app.button(key="catalog_previous").click().run()
+    assert not app.exception and app.session_state["catalog_page"] == 0
+
+
+def test_invalid_review_configuration_keeps_catalog_and_filters_usable(app):
+    app.secrets["reviews"] = "invalid"
+    app.run()
+    assert not app.exception
+    assert any("評論暫時無法載入" in warning.value for warning in app.warning)
+    submit_buttons = [button for button in app.button if (button.key or "").startswith("review_submit_")]
+    assert len(submit_buttons) == 6 and all(button.disabled for button in submit_buttons)
+    app.pills(key="location_choices").set_value(["Shida"]).run()
+    assert not app.exception and len(names(app)) == 3
+    assert not app.button(key="pick_meal").disabled

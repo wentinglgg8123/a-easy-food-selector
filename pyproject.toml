@@ -1,5 +1,5 @@
 [project]
-name = "foodflix-food-picker"
+name = "food-picker"
 version = "2.1.0"
 description = "以 Python 製作的 Excel 美食探索與隨機推薦網站"
 requires-python = ">=3.12"

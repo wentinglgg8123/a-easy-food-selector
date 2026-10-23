@@ -196,10 +196,13 @@ def _download_rows(page, button_name, destination):
 
 
 def test_default_catalog_is_shared_and_random_recommendations_do_not_repeat(page):
-    expect(page.locator("header").get_by_text(re.compile("FOODFLIX"))).to_be_visible()
+    expect(page.get_by_text("FOODFLIX", exact=True)).to_have_count(0)
     expect(page.get_by_role("combobox")).to_have_count(0)
     expect(page.get_by_role("toolbar")).to_have_count(5)
     expect(page.get_by_role("toolbar", name="食物種類", exact=True).get_by_role("button")).to_have_count(25)
+    for label in ("地點", "食物種類"):
+        bounds = page.get_by_role("toolbar", name=label, exact=True).get_by_role("button").first.bounding_box()
+        assert bounds is not None and 0 <= bounds["y"] < page.viewport_size["height"], bounds
     _expect_count(page, 175)
     expect(page.get_by_role("button", name="下載完整名單", exact=True)).to_be_visible()
     page.get_by_role("button", name="幫我決定這一餐", exact=True).click()
@@ -212,6 +215,7 @@ def test_default_catalog_is_shared_and_random_recommendations_do_not_repeat(page
         expect(result).not_to_have_text(previous)
         previous = result.inner_text()
         assert previous != "郭董麻辣牛肉麵"
+    page.locator("summary").filter(has_text="最近推薦").click()
     expect(page.get_by_role("heading", name="最近推薦", exact=True)).to_be_visible()
 
 
@@ -220,16 +224,16 @@ def test_actual_location_genre_price_and_occasion_filters_then_reset(page):
     _expect_count(page, 75)
     _select_pills(page, "食物種類", ["牛排"])
     _expect_count(page, 4)
-    _select_pills(page, "價格等級", ["等級 1"])
+    _select_pills(page, "價格等級", ["🪙"])
     _select_pills(page, "用餐情境", ["約會", "聚餐"])
     _expect_count(page, 1)
     page.get_by_role("button", name="幫我決定這一餐", exact=True).click()
     expect(page.locator(f"{RESULT} h2")).to_have_text("孫東寶牛排")
-    expect(page.locator(RESULT)).not_to_contain_text("NT$")
+    expect(page.locator(RESULT)).to_contain_text("🪙 · NT$0–100")
     query = _query(page, "不存在的餐廳")
     _expect_count(page, 0)
     expect(page.get_by_role("button", name="幫我決定這一餐", exact=True)).to_be_disabled()
-    page.get_by_role("button", name="重設篩選", exact=True).click()
+    page.get_by_role("button", name="全部取消", exact=True).click()
     _expect_count(page, 175)
     expect(query).to_have_value("")
     expect(page.get_by_role("toolbar", name="食物種類", exact=True).get_by_role("button", pressed=True)).to_have_count(0)
@@ -242,7 +246,7 @@ def test_rich_import_requires_all_features_uses_named_maps_and_restores_defaults
     _import_catalog(page)
     _select_pills(page, "地點", ["公館"])
     _select_pills(page, "食物種類", ["便當"])
-    _select_pills(page, "價格等級", ["等級 2"])
+    _select_pills(page, "價格等級", ["🪙🪙"])
     _select_pills(page, "用餐情境", ["一個人吃", "約會", "聚餐"])
     _select_pills(page, "用餐節奏", ["快速上菜", "慢慢享用"])
     _expect_count(page, 1)
@@ -322,7 +326,7 @@ def test_closed_restaurant_is_visible_only_on_request_and_never_recommended(page
     expect(page.get_by_role("button", name="幫我決定這一餐", exact=True)).to_be_disabled()
     expect(page.get_by_text(re.compile("關門了")).first).to_be_visible()
     expect(page.locator(RESULT)).not_to_be_visible()
-    page.get_by_role("button", name="重設篩選", exact=True).click()
+    page.get_by_role("button", name="全部取消", exact=True).click()
     _expect_count(page, 175)
     expect(checkbox).not_to_be_checked()
 
@@ -345,19 +349,64 @@ def test_multiple_pills_union_within_groups_and_toggle_off_without_dropdowns(pag
     _expect_count(page, 5)
     _select_pills(page, "食物種類", ["便當", "牛排"])
     _expect_count(page, 4)
-    _select_pills(page, "價格等級", ["等級 1", "等級 3"])
+    _select_pills(page, "價格等級", ["🪙", "🪙🪙🪙"])
     _expect_count(page, 3)
-    catalog = page.get_by_role("region", name="餐廳名單", exact=True)
+    catalog = page.locator(".st-key-catalog_grid")
     for name in ("甲店", "乙店", "己店"):
         expect(catalog.get_by_role("heading", name=name, exact=True)).to_be_visible()
     for name in ("丙店", "丁店", "戊店"):
         expect(catalog.get_by_role("heading", name=name, exact=True)).to_have_count(0)
 
-    _toggle_pill_off(page, "價格等級", "等級 1")
+    _toggle_pill_off(page, "價格等級", "🪙")
     _expect_count(page, 2)
-    _toggle_pill_off(page, "價格等級", "等級 3")
+    _toggle_pill_off(page, "價格等級", "🪙🪙🪙")
     _expect_count(page, 4)
-    page.get_by_role("button", name="重設篩選", exact=True).click()
+    page.get_by_role("button", name="全部取消", exact=True).click()
     _expect_count(page, 6)
     for label in ("地點", "食物種類", "價格等級", "用餐情境", "用餐節奏"):
         expect(page.get_by_role("toolbar", name=label, exact=True).get_by_role("button", pressed=True)).to_have_count(0)
+
+
+def test_each_filter_group_has_select_all_and_cancel_buttons(page):
+    groups = {
+        "location_choices": ("地點", 8),
+        "category_choices": ("食物種類", 25),
+        "price_choices": ("價格等級", 5),
+        "occasion_choice": ("用餐情境", 3),
+        "pace_choice": ("用餐節奏", 2),
+    }
+    for key, (label, option_count) in groups.items():
+        group = page.locator(f".st-key-group_{key}")
+        group.get_by_role("button", name="全選", exact=True).click()
+        selected = page.get_by_role("toolbar", name=label, exact=True).get_by_role("button", pressed=True)
+        expect(selected).to_have_count(option_count)
+        _wait_idle(page)
+        group.get_by_role("button", name="取消", exact=True).click()
+        expect(selected).to_have_count(0)
+        _expect_count(page, 175)
+    legend = page.get_by_role("list", name="金幣價格範圍說明", exact=True)
+    for price_range in ("NT$0–100", "NT$100–200", "NT$200–300", "NT$300–500", "NT$500以上"):
+        expect(legend).to_contain_text(price_range)
+
+
+def test_all_catalog_pages_have_per_restaurant_comment_forms(page):
+    previous = page.get_by_role("button", name="上一頁", exact=True)
+    next_page = page.get_by_role("button", name="下一頁", exact=True)
+    expect(previous).to_be_disabled()
+    expect(page.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(page.get_by_test_id("stForm")).to_have_count(6)
+    expect(page.get_by_role("textbox", name="評論內容", exact=True)).to_have_count(6)
+    publish = page.get_by_role("button", name="發布評論", exact=True)
+    expect(publish).to_have_count(6)
+    for button in publish.all():
+        expect(button).to_be_disabled()
+
+    next_page.click()
+    expect(page.get_by_role("heading", name="泰好吃泰國船麵", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="孫東寶牛排", exact=True)).to_have_count(0)
+    expect(page.get_by_test_id("stForm")).to_have_count(6)
+    expect(page.get_by_role("textbox", name="評論內容", exact=True)).to_have_count(6)
+    expect(previous).to_be_enabled()
+    previous.click()
+    expect(page.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(previous).to_be_disabled()
