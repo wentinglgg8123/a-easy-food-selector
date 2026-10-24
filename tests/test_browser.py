@@ -550,3 +550,57 @@ def test_homophone_typo_suggests_real_names_and_click_opens_a_direct_review_form
     expect(results).to_have_count(0)
     expect(suggestions).to_have_count(0)
     _expect_count(page, 3)
+
+
+def test_typing_short_homophone_and_exact_names_updates_search_without_enter_or_blur(page):
+    query = page.get_by_role("textbox", name="搜尋店家", exact=True)
+    query.fill("孫東保")
+    suggestion = page.locator(".st-key-search_suggestions").get_by_role(
+        "button", name="孫東寶牛排", exact=True
+    )
+    expect(suggestion).to_be_visible()
+    expect(query).to_be_focused()
+    expect(query).to_have_value("孫東保")
+    suggestion.click()
+    results = page.locator(".st-key-search_results")
+    expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(results.get_by_role("textbox", name="評論內容", exact=True)).to_be_visible()
+    expect(results.get_by_role("slider")).to_have_attribute("step", "0.5")
+
+    query.fill("")
+    expect(results).to_have_count(0)
+    expect(query).to_be_focused()
+    query.fill("孫東寶牛排")
+    expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(query).to_be_focused()
+    expect(results.get_by_role("button", name="發布評論", exact=True)).to_be_disabled()
+
+
+def test_rapid_typing_and_clear_cancel_pending_live_search_updates(page):
+    query = page.get_by_role("textbox", name="搜尋店家", exact=True)
+    query.fill("頂瓜瓜")
+    query.fill("孫東保")
+    expect(page.locator(".st-key-search_suggestions").get_by_role(
+        "button", name="孫東寶牛排", exact=True
+    )).to_be_visible()
+    expect(query).to_be_focused()
+    expect(query).to_have_value("孫東保")
+
+    query.fill("孫東寶牛排")
+    page.get_by_role("button", name="清除搜尋", exact=True).click()
+    expect(query).to_have_value("")
+    expect(page.locator(".st-key-search_results")).to_have_count(0)
+    # A cancelled 350 ms callback must stay cancelled after its original deadline.
+    page.wait_for_timeout(600)
+    expect(query).to_have_value("")
+    expect(page.locator(".st-key-search_results")).to_have_count(0)
+    expect(page.locator(".st-key-search_suggestions")).to_have_count(0)
+
+    query.fill("頂瓜瓜")
+    query.fill("孫東寶牛排")
+    results = page.locator(".st-key-search_results")
+    expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    page.wait_for_timeout(600)
+    expect(query).to_be_focused()
+    expect(query).to_have_value("孫東寶牛排")
+    expect(results.get_by_role("heading", name="頂呱呱", exact=True)).to_have_count(0)

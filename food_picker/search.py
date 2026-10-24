@@ -32,7 +32,13 @@ def _sounds(text: str) -> tuple[frozenset[str], ...]:
         text, style=Style.NORMAL, heteronym=True,
         errors=lambda unknown: list(unknown),
     )
-    return tuple(frozenset(reading) for reading in readings)
+    tokens = []
+    for character, phrase_readings in zip(text, readings):
+        # Phrase dictionaries can suppress a valid brand-name pronunciation:
+        # 呱呱 is normally "gu gu", while 頂呱呱 is pronounced "ding gua gua".
+        character_readings = pinyin(character, style=Style.NORMAL, heteronym=True)[0] if _is_han(character) else ()
+        tokens.append(frozenset(phrase_readings) | frozenset(character_readings))
+    return tuple(tokens)
 
 
 def _distance(left: str, right: str, maximum: int) -> int:

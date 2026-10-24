@@ -388,3 +388,10 @@ def test_unrelated_and_empty_queries_do_not_show_store_suggestions(app):
     assert not app.exception and app.text_input(key="query_choice").value == ""
     assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
     assert len(names(app)) == 175
+
+
+def test_top_search_is_configured_to_update_after_a_short_typing_pause(app):
+    query = app.text_input(key="query_choice")
+    assert query.proto.HasField("live_debounce_ms")
+    assert query.proto.live_debounce_ms == 350
+    assert "即時搜尋" in query.proto.placeholder

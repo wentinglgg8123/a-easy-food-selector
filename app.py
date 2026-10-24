@@ -196,7 +196,8 @@ def render_search(state: PickerSession, access: PageReviews) -> None:
     with st.container(key="top_search"):
         query = st.text_input(
             "搜尋店家", key="query_choice", max_chars=200,
-            placeholder="輸入店名，按 Enter 搜尋並直接評論", icon=":material/search:",
+            placeholder="輸入店名，即時搜尋並直接評論", icon=":material/search:",
+            live="350ms",
         )
         st.button(
             "清除搜尋", key="clear_search_query", icon=":material/close:",

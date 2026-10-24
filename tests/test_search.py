@@ -36,6 +36,13 @@ def test_actual_catalog_suggests_the_real_restaurant_for_homophones_and_typos(qu
     assert all(item in stores for item in suggestions)
 
 
+def test_brand_name_homophones_keep_single_character_readings_suppressed_by_phrases():
+    stores = load_default_catalog().restaurants
+    assert find_restaurants(stores, "頂瓜瓜") == []
+    suggestions = suggest_restaurants(stores, "頂瓜瓜")
+    assert suggestions and suggestions[0].name == "頂呱呱"
+
+
 def test_partial_homophones_match_a_contiguous_window_in_longer_names():
     store = restaurant("正宗孫東寶牛排公館分店")
     assert suggest_restaurants([store], "孫冬保") == [store]
