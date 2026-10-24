@@ -337,3 +337,54 @@ def test_top_search_paginates_results_and_resets_when_query_changes(app):
     app.text_input(key="query_choice").set_value("孫東寶牛排").run()
     assert not app.exception
     assert len([field for field in app.text_area if field.key.startswith("review_body_search_")]) == 1
+
+
+def test_clear_search_only_clears_query_and_search_pagination(app):
+    app.pills(key="location_choices").set_value(["Gongguan"])
+    app.pills(key="category_choices").set_value(["牛排"])
+    app.text_input(key="query_choice").set_value("牛排").run()
+    app.button(key="pick_meal").click().run()
+    chosen = app.session_state["picker"].selected
+    history = list(app.session_state["picker"].history)
+    app.button(key="search_next").click().run()
+    app.text_input(key="query_choice").set_value("尚未送出的文字")
+    app.button(key="clear_search_query").click().run()
+    assert not app.exception
+    assert app.text_input(key="query_choice").value == ""
+    assert app.pills(key="location_choices").value == ["Gongguan"]
+    assert app.pills(key="category_choices").value == ["牛排"]
+    assert app.session_state["search_page"] == 0
+    assert "search_signature" not in app.session_state
+    assert app.session_state["picker"].selected == chosen
+    assert app.session_state["picker"].history == history
+    assert len(names(app)) == 4
+    assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
+
+
+def test_homophone_typo_suggests_a_real_store_without_changing_the_query_until_clicked(app):
+    restaurant = next(r for r in app.session_state["picker"].restaurants if r.name == "孫東寶牛排")
+    app.pills(key="location_choices").set_value(["Shida"]).run()
+    app.text_input(key="query_choice").set_value("孫東保牛排").run()
+    assert not app.exception
+    assert app.text_input(key="query_choice").value == "孫東保牛排"
+    suggestion = app.button(key=f"search_suggestion_{restaurant.id}")
+    assert suggestion.label == "孫東寶牛排"
+    assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
+    suggestion.click().run()
+    assert not app.exception
+    assert app.text_input(key="query_choice").value == "孫東寶牛排"
+    assert app.pills(key="location_choices").value == ["Shida"]
+    assert names(app) == []
+    assert app.text_area(key=f"review_body_search_{restaurant.id}").value == ""
+    assert app.slider(key=f"review_rating_search_{restaurant.id}").proto.step == 0.5
+    assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
+
+
+def test_unrelated_and_empty_queries_do_not_show_store_suggestions(app):
+    app.text_input(key="query_choice").set_value("ZXQ987654321外太空不存在的店").run()
+    assert not app.exception
+    assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
+    app.button(key="clear_search_query").click().run()
+    assert not app.exception and app.text_input(key="query_choice").value == ""
+    assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
+    assert len(names(app)) == 175

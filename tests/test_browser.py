@@ -485,3 +485,68 @@ def test_top_search_pages_expose_comment_forms_for_every_matching_store(page):
     expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
     _query(page, "孫東寶牛排")
     expect(results.get_by_test_id("stForm")).to_have_count(1)
+
+
+def test_search_clear_icon_is_inside_the_field_and_clears_unsent_text_preserving_filters(page):
+    query = page.get_by_role("textbox", name="搜尋店家", exact=True)
+    clear = page.get_by_role("button", name="清除搜尋", exact=True)
+    expect(clear).to_be_visible()
+    field_bounds = query.bounding_box()
+    button_bounds = clear.bounding_box()
+    assert field_bounds is not None and button_bounds is not None
+    assert field_bounds["x"] + field_bounds["width"] * .7 <= button_bounds["x"]
+    assert button_bounds["x"] + button_bounds["width"] <= field_bounds["x"] + field_bounds["width"] + 1
+    assert field_bounds["y"] - 1 <= button_bounds["y"]
+    assert button_bounds["y"] + button_bounds["height"] <= field_bounds["y"] + field_bounds["height"] + 1
+    if page.viewport_size["width"] <= 640:
+        assert button_bounds["width"] >= 40 and button_bounds["height"] >= 40
+
+    _select_pills(page, "地點", ["公館"])
+    _select_pills(page, "食物種類", ["牛排"])
+    _query(page, "孫東寶牛排")
+    expect(page.locator(".st-key-search_results").get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    query.fill("尚未按 Enter 的文字")
+    clear.click()
+    expect(query).to_have_value("")
+    expect(page.locator(".st-key-search_results")).to_have_count(0)
+    expect(page.locator(".st-key-search_suggestions")).to_have_count(0)
+    _expect_count(page, 4)
+    for label, name in (("地點", "公館"), ("食物種類", "牛排")):
+        expect(page.get_by_role("toolbar", name=label, exact=True).get_by_role("button", name=name, exact=True)).to_have_attribute("aria-pressed", "true")
+
+    _query(page, "孫東寶牛排")
+    query.focus()
+    query.press("Tab")
+    expect(clear).to_be_focused()
+    clear.press("Enter")
+    expect(query).to_have_value("")
+    _expect_count(page, 4)
+
+
+def test_homophone_typo_suggests_real_names_and_click_opens_a_direct_review_form(page):
+    _select_pills(page, "地點", ["師大"])
+    query = _query(page, "孫東保牛排")
+    suggestions = page.locator(".st-key-search_suggestions")
+    suggestion = suggestions.get_by_role("button", name="孫東寶牛排", exact=True)
+    expect(suggestion).to_be_visible()
+    expect(query).to_have_value("孫東保牛排")
+    expect(page.locator(".st-key-search_results").get_by_test_id("stForm")).to_have_count(0)
+    suggestion.click()
+    expect(query).to_have_value("孫東寶牛排")
+    expect(suggestions).to_have_count(0)
+    results = page.locator(".st-key-search_results")
+    expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(results.get_by_role("textbox", name="您的暱稱", exact=True)).to_be_visible()
+    expect(results.get_by_role("textbox", name="評論內容", exact=True)).to_be_visible()
+    expect(results.get_by_role("slider")).to_have_attribute("step", "0.5")
+    expect(results.get_by_role("button", name="發布評論", exact=True)).to_be_disabled()
+    _expect_count(page, 0)
+
+    _query(page, "ZXQ987654321外太空不存在的店")
+    expect(suggestions).to_have_count(0)
+    expect(results.get_by_test_id("stForm")).to_have_count(0)
+    page.get_by_role("button", name="清除搜尋", exact=True).click()
+    expect(query).to_have_value("")
+    expect(results).to_have_count(0)
+    expect(suggestions).to_have_count(0)
+    _expect_count(page, 3)

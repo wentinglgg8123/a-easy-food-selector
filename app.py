@@ -16,6 +16,7 @@ from food_picker.presentation import (
 )
 from food_picker.reviews import ReviewError, configured_review_store
 from food_picker.review_ui import render_reviews
+from food_picker.search import find_restaurants, suggest_restaurants
 from food_picker.session import PickerSession
 
 ROOT = Path(__file__).parent
@@ -91,6 +92,18 @@ def set_catalog_page(index: int) -> None:
 
 def set_search_page(index: int) -> None:
     st.session_state["search_page"] = max(0, index)
+
+
+def clear_search() -> None:
+    st.session_state["query_choice"] = ""
+    st.session_state["search_page"] = 0
+    st.session_state.pop("search_signature", None)
+
+
+def use_search_suggestion(name: str) -> None:
+    st.session_state["query_choice"] = name
+    st.session_state["search_page"] = 0
+    st.session_state.pop("search_signature", None)
 
 
 def read_filters() -> Filters:
@@ -185,10 +198,14 @@ def render_search(state: PickerSession, access: PageReviews) -> None:
             "搜尋店家", key="query_choice", max_chars=200,
             placeholder="輸入店名，按 Enter 搜尋並直接評論", icon=":material/search:",
         )
+        st.button(
+            "清除搜尋", key="clear_search_query", icon=":material/close:",
+            type="tertiary", help="清除搜尋", on_click=clear_search,
+        )
     normalized = normalize("NFKC", query).casefold().strip()
     if not normalized:
         return
-    matches = [r for r in state.restaurants if normalized in normalize("NFKC", r.name).casefold()]
+    matches = find_restaurants(state.restaurants, query)
     signature = (normalized, tuple(r.id for r in matches))
     if st.session_state.get("search_signature") != signature:
         st.session_state["search_signature"] = signature
@@ -209,7 +226,18 @@ def render_search(state: PickerSession, access: PageReviews) -> None:
                     st.button("下一頁搜尋結果", key="search_next", disabled=page + 1 >= page_count,
                               on_click=set_search_page, args=(page + 1,))
         else:
-            st.info("找不到這間店家，試試其他店名或較短的關鍵字。")
+            st.info("找不到完全符合的店家，試試下方建議，或輸入較短的店名。")
+            suggestions = suggest_restaurants(state.restaurants, query)
+            if suggestions:
+                with st.container(key="search_suggestions"):
+                    st.subheader("你是不是想找這些店家？", anchor=False)
+                    st.caption("依相似讀音與字詞提供建議；點選店名即可查看並評論。")
+                    for restaurant in suggestions:
+                        st.button(
+                            restaurant.name, key=f"search_suggestion_{restaurant.id}",
+                            icon=":material/search:", width="stretch",
+                            on_click=use_search_suggestion, args=(restaurant.name,),
+                        )
 
 
 def render_source(state: PickerSession) -> None:
