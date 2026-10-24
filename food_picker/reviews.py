@@ -26,6 +26,10 @@ class ReviewValidationError(ReviewError):
     """A review or query must be corrected before contacting the database."""
 
 
+class _MissingRatingsRPC(ReviewError):
+    """Only the versioned read endpoint is missing; legacy reads may still work."""
+
+
 @dataclass(frozen=True)
 class Review:
     id: str
@@ -33,12 +37,14 @@ class Review:
     author: str
     body: str
     created_at: str
+    rating: float | None = None
 
 
 _RESTAURANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", re.ASCII)
 _MAX_RESPONSE_BYTES = 512_000
 _CONFIG_ERROR = "公開留言服務設定不完整或格式有誤，請聯絡網站管理員。"
 _REMOTE_ERROR = "公開留言服務暫時無法使用，請稍後再試。"
+_MIGRATION_ERROR = "留言評分功能尚未完成資料庫升級，請聯絡網站管理員；既有評論會保留。"
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -89,6 +95,22 @@ def _name(value: object) -> str:
     return value.strip()
 
 
+def _rating(value: object) -> float | None:
+    """Half stars are exactly representable, so no rounding or tolerance is needed."""
+    if value is None:
+        return None
+    message = "評分請選擇 1–5 顆星，每次以半顆星為單位。"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ReviewValidationError(message)
+    try:
+        number = float(value)
+    except OverflowError:
+        raise ReviewValidationError(message) from None
+    if not math.isfinite(number) or not 1 <= number <= 5 or not (number * 2).is_integer():
+        raise ReviewValidationError(message)
+    return number
+
+
 def _base_url(value: object) -> str:
     if not isinstance(value, str):
         raise ReviewError(_CONFIG_ERROR)
@@ -135,6 +157,7 @@ class SupabaseReviewStore:
         self._key = service_role_key
         self._transport = transport if transport is not None else _open_request
         self._timeout = float(timeout)
+        self.ratings_ready = True
 
     def _request(self, method: str, path: str, payload: object = None, *, prefer: str | None = None) -> object:
         headers = {
@@ -154,7 +177,10 @@ class SupabaseReviewStore:
                 raise ReviewError(_REMOTE_ERROR)
             return json.loads(raw)
         except HTTPError as error:
-            message = _CONFIG_ERROR if error.code in (401, 403, 404) else _REMOTE_ERROR
+            if error.code == 404 and path == "/rest/v1/rpc/food_picker_reviews_for_restaurants_v2":
+                raise _MissingRatingsRPC(_MIGRATION_ERROR) from None
+            else:
+                message = _CONFIG_ERROR if error.code in (401, 403, 404) else _REMOTE_ERROR
             raise ReviewError(message) from None
         except (URLError, OSError, TimeoutError, HTTPException, ValueError, TypeError, UnicodeError):
             raise ReviewError(_REMOTE_ERROR) from None
@@ -169,6 +195,7 @@ class SupabaseReviewStore:
             restaurant_id = _restaurant_id(value["restaurant_id"])
             author = _author(value["author"])
             body = _body(value["body"])
+            rating = _rating(value.get("rating"))
             created_at = value["created_at"]
             if not isinstance(created_at, str):
                 raise ValueError
@@ -177,7 +204,7 @@ class SupabaseReviewStore:
                 raise ValueError
         except (KeyError, ValueError, TypeError, ReviewValidationError):
             raise ReviewError(_REMOTE_ERROR) from None
-        return Review(review_id, restaurant_id, author, body, created_at)
+        return Review(review_id, restaurant_id, author, body, created_at, rating)
 
     def load_reviews(self, restaurant_ids: Sequence[str], limit: int = 3) -> dict[str, list[Review]]:
         """Fetch up to ten newest reviews each for at most 24 restaurant IDs."""
@@ -191,14 +218,24 @@ class SupabaseReviewStore:
         result: dict[str, list[Review]] = {restaurant_id: [] for restaurant_id in ids}
         if not ids:
             return result
-        payload = self._request(
-            "POST", "/rest/v1/rpc/food_picker_reviews_for_restaurants",
-            {"restaurant_ids": ids, "review_limit": limit},
-        )
+        arguments = {"restaurant_ids": ids, "review_limit": limit}
+        try:
+            payload = self._request(
+                "POST", "/rest/v1/rpc/food_picker_reviews_for_restaurants_v2", arguments,
+            )
+        except _MissingRatingsRPC:
+            self.ratings_ready = False
+            payload = self._request(
+                "POST", "/rest/v1/rpc/food_picker_reviews_for_restaurants", arguments,
+            )
+        else:
+            self.ratings_ready = True
         if not isinstance(payload, list):
             raise ReviewError(_REMOTE_ERROR)
         seen: set[str] = set()
         for value in payload:
+            if not self.ratings_ready and isinstance(value, dict):
+                value = {**value, "rating": None}
             review = self._review(value)
             if review.restaurant_id not in result:
                 raise ReviewError(_REMOTE_ERROR)
@@ -218,21 +255,28 @@ class SupabaseReviewStore:
         body: str,
         submission_id: str,
         restaurant_name: str = "",
+        *,
+        rating: float | None = None,
     ) -> Review:
         """Persist once per submission UUID, recovering safely from uncertain retries."""
         restaurant_id = _restaurant_id(restaurant_id)
         review_id = _submission_id(submission_id)
         author, body, restaurant_name = _author(author), _body(body), _name(restaurant_name)
+        rating = _rating(rating)
+        if rating is not None and not self.ratings_ready:
+            raise ReviewError(_MIGRATION_ERROR)
         payload = {
             "id": review_id, "restaurant_id": restaurant_id, "restaurant_name": restaurant_name,
             "author": author, "body": body,
         }
+        if rating is not None:
+            payload["rating"] = rating
         response = self._request(
             "POST", "/rest/v1/restaurant_reviews?on_conflict=id", payload,
             prefer="resolution=ignore-duplicates,return=representation",
         )
         if response == []:
-            query = urlencode({"id": f"eq.{review_id}", "select": "id,restaurant_id,author,body,created_at", "limit": 1})
+            query = urlencode({"id": f"eq.{review_id}", "select": "*", "limit": 1})
             response = self._request("GET", "/rest/v1/restaurant_reviews?" + query)
         if not isinstance(response, list) or len(response) != 1:
             raise ReviewError(_REMOTE_ERROR)

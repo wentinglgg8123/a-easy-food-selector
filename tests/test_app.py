@@ -38,6 +38,8 @@ def test_initial_page_loads_real_catalog_for_every_visitor(app):
     assert len(app.selectbox) == 0 and len(app.multiselect) == 0
     assert len(app.pills) == 5
     assert not any("FOODFLIX" in element.value for element in app.get("html"))
+    assert app.text_input[0].key == "query_choice"
+    assert app.text_input[0].label == "搜尋店家"
 
 
 def test_pick_renders_real_recommendation_without_consecutive_repeats(app):
@@ -276,3 +278,62 @@ def test_invalid_review_configuration_keeps_catalog_and_filters_usable(app):
     app.pills(key="location_choices").set_value(["Shida"]).run()
     assert not app.exception and len(names(app)) == 3
     assert not app.button(key="pick_meal").disabled
+
+
+def test_top_name_search_ignores_location_filters_and_finds_closed_restaurants(app):
+    state = app.session_state["picker"]
+    steak = next(restaurant for restaurant in state.restaurants if restaurant.name == "孫東寶牛排")
+    closed = next(restaurant for restaurant in state.restaurants if restaurant.name == "郭董麻辣牛肉麵")
+    app.pills(key="location_choices").set_value(["Shida"]).run()
+    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    assert not app.exception and names(app) == []
+    assert app.text_area(key=f"review_body_search_{steak.id}").value == ""
+    assert app.text_input(key=f"review_author_search_{steak.id}").label == "您的暱稱"
+    assert app.button(key=f"review_submit_search_{steak.id}").disabled
+
+    app.text_input(key="query_choice").set_value("郭董麻辣牛肉麵").run()
+    assert not app.exception and names(app) == []
+    assert app.text_area(key=f"review_body_search_{closed.id}").value == ""
+    assert app.checkbox(key="include_closed").value is False
+    assert app.button(key="pick_meal").disabled
+    app.button(key="clear_all_filters").click().run()
+    assert not app.exception and len(names(app)) == 175
+    assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
+
+
+def test_search_recommendation_and_catalog_have_separate_half_star_rating_controls(app):
+    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    app.button(key="pick_meal").click().run()
+    assert not app.exception
+    restaurant = app.session_state["picker"].selected
+    assert restaurant.name == "孫東寶牛排"
+    bodies = [field for field in app.text_area if restaurant.id in field.key]
+    assert len(bodies) == 3 and len({field.key for field in bodies}) == 3
+    recommendation_key = f"review_rating_recommendation_{restaurant.id}"
+    search_key = f"review_rating_search_{restaurant.id}"
+    ratings = [slider for slider in app.slider if restaurant.id in slider.key]
+    assert len(ratings) == 3 and len({slider.key for slider in ratings}) == 3
+    for slider in ratings:
+        assert slider.value == 3.0
+        assert slider.proto.min == 1.0 and slider.proto.max == 5.0
+        assert slider.proto.step == 0.5
+    assert app.slider(key=recommendation_key).value == app.slider(key=search_key).value
+    assert app.text_area(key=f"review_body_search_{restaurant.id}").value == ""
+    assert app.button(key=f"review_submit_recommendation_{restaurant.id}").disabled
+
+
+def test_top_search_paginates_results_and_resets_when_query_changes(app):
+    app.text_input(key="query_choice").set_value("牛排").run()
+    assert not app.exception
+    search_bodies = [field.key for field in app.text_area if field.key.startswith("review_body_search_")]
+    assert len(search_bodies) == 3
+    assert app.button(key="search_previous").disabled
+    assert not app.button(key="search_next").disabled
+    app.button(key="search_next").click().run()
+    assert not app.exception
+    next_bodies = [field.key for field in app.text_area if field.key.startswith("review_body_search_")]
+    assert len(next_bodies) == 3 and set(next_bodies).isdisjoint(search_bodies)
+    assert not app.button(key="search_previous").disabled
+    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    assert not app.exception
+    assert len([field for field in app.text_area if field.key.startswith("review_body_search_")]) == 1

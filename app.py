@@ -2,6 +2,7 @@
 
 from html import escape
 from pathlib import Path
+from unicodedata import normalize
 
 import streamlit as st
 
@@ -25,6 +26,48 @@ FILTER_DEFAULTS = {
     "max_price_choice": None,
 }
 CATALOG_PAGE_SIZE = 6
+SEARCH_PAGE_SIZE = 3
+
+
+class PageReviews:
+    """Reuse one review connection and each restaurant's results within a page run."""
+
+    def __init__(self) -> None:
+        self.store = None
+        self.failed = False
+        self.reviews = {}
+        self.notice_shown = False
+        try:
+            try:
+                config = st.secrets.get("reviews", {})
+            except FileNotFoundError:
+                config = {}
+            self.store = configured_review_store(config)
+        except ReviewError:
+            self.failed = True
+
+    def load(self, restaurants: list[Restaurant]) -> dict:
+        if self.store is not None and not self.failed:
+            missing = list(dict.fromkeys(r.id for r in restaurants if r.id not in self.reviews))
+            if missing:
+                try:
+                    self.reviews.update(self.store.load_reviews(missing, limit=3))
+                except ReviewError:
+                    self.failed = True
+        return {r.id: self.reviews.get(r.id, []) for r in restaurants}
+
+    def show_status(self) -> None:
+        if self.notice_shown:
+            return
+        if self.failed:
+            st.warning("評論暫時無法載入，請稍後再試。")
+        elif self.store is None:
+            st.info("評論尚未啟用，請網站管理員完成資料庫設定。")
+        elif not self.store.ratings_ready:
+            st.info("評分功能尚待啟用，請網站管理員執行資料庫升級。")
+        else:
+            return
+        self.notice_shown = True
 
 
 def picker() -> PickerSession:
@@ -44,6 +87,10 @@ def set_filter_choices(key: str, choices: list) -> None:
 
 def set_catalog_page(index: int) -> None:
     st.session_state["catalog_page"] = max(0, index)
+
+
+def set_search_page(index: int) -> None:
+    st.session_state["search_page"] = max(0, index)
 
 
 def read_filters() -> Filters:
@@ -118,6 +165,53 @@ def render_header() -> None:
             import_dialog()
 
 
+def render_restaurant_cards(restaurants: list[Restaurant], access: PageReviews, *, context: str) -> None:
+    reviews = access.load(restaurants)
+    access.show_status()
+    for offset in range(0, len(restaurants), 3):
+        columns = st.columns(3, gap="medium")
+        for column, restaurant in zip(columns, restaurants[offset:offset + 3]):
+            with column:
+                key = f"restaurant_{restaurant.id}" if context == "catalog" else f"{context}_restaurant_{restaurant.id}"
+                with st.container(border=True, key=key):
+                    st.html(restaurant_card(restaurant))
+                    render_reviews(restaurant, access.store, reviews.get(restaurant.id, []),
+                                   load_error=access.failed, context=context)
+
+
+def render_search(state: PickerSession, access: PageReviews) -> None:
+    with st.container(key="top_search"):
+        query = st.text_input(
+            "搜尋店家", key="query_choice", max_chars=200,
+            placeholder="輸入店名，按 Enter 搜尋並直接評論", icon=":material/search:",
+        )
+    normalized = normalize("NFKC", query).casefold().strip()
+    if not normalized:
+        return
+    matches = [r for r in state.restaurants if normalized in normalize("NFKC", r.name).casefold()]
+    signature = (normalized, tuple(r.id for r in matches))
+    if st.session_state.get("search_signature") != signature:
+        st.session_state["search_signature"] = signature
+        st.session_state["search_page"] = 0
+    page_count = max(1, (len(matches) + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
+    page = min(st.session_state.get("search_page", 0), page_count - 1)
+    visible = matches[page * SEARCH_PAGE_SIZE:(page + 1) * SEARCH_PAGE_SIZE]
+    with st.container(key="search_results"):
+        st.subheader("搜尋結果", anchor=False)
+        st.caption(f"找到 {len(matches)} 間店家 · 搜尋整份名單，不受下方篩選限制")
+        if visible:
+            render_restaurant_cards(visible, access, context="search")
+            if page_count > 1:
+                with st.container(horizontal=True, vertical_alignment="center", key="search_pagination"):
+                    st.button("上一頁搜尋結果", key="search_previous", disabled=page == 0,
+                              on_click=set_search_page, args=(page - 1,))
+                    st.caption(f"搜尋結果第 {page + 1} / {page_count} 頁", width="stretch")
+                    st.button("下一頁搜尋結果", key="search_next", disabled=page + 1 >= page_count,
+                              on_click=set_search_page, args=(page + 1,))
+        else:
+            st.info("找不到這間店家，試試其他店名或較短的關鍵字。")
+
+
 def render_source(state: PickerSession) -> None:
     if notice := st.session_state.pop("notice", None):
         st.success(notice)
@@ -179,7 +273,6 @@ def render_filters(state: PickerSession) -> Filters:
         render_filter_group("用餐節奏", ["快速上菜", "慢慢享用"], "pace_choice")
         st.caption("需同時符合所選節奏")
     st.html(price_legend_html())
-    st.text_input("搜尋餐廳", placeholder="店名、地點、料理或備註", key="query_choice", max_chars=200)
     with st.expander("更多選項"):
         st.checkbox("包含已註記歇業店家", key="include_closed", help="僅供瀏覽與查詢；歇業店家不參與隨機推薦。")
         if any(r.price is not None for r in state.restaurants):
@@ -191,7 +284,7 @@ def render_filters(state: PickerSession) -> Filters:
     return filters
 
 
-def render_recommendation(state: PickerSession, filters: Filters) -> None:
+def render_recommendation(state: PickerSession, filters: Filters, access: PageReviews) -> None:
     candidates = state.candidates(filters)
     available = sum(not r.is_closed for r in candidates)
     current = state.current(filters)
@@ -220,6 +313,12 @@ def render_recommendation(state: PickerSession, filters: Filters) -> None:
         width="stretch", key="pick_meal",
     )
     st.caption("目前只有 1 間可抽選，會推薦同一家。" if available == 1 else "每間符合條件的可用店家均等抽選，連續推薦不重複上一間。")
+    if current is not None:
+        reviews = access.load([current])
+        access.show_status()
+        with st.container(key="recommendation_reviews"):
+            render_reviews(current, access.store, reviews.get(current.id, []),
+                           load_error=access.failed, context="recommendation")
 
 
 def render_rail(title: str, subtitle: str, restaurants: list[Restaurant], key: str) -> None:
@@ -232,7 +331,7 @@ def render_rail(title: str, subtitle: str, restaurants: list[Restaurant], key: s
     )
 
 
-def render_catalog(state: PickerSession, filters: Filters) -> None:
+def render_catalog(state: PickerSession, filters: Filters, access: PageReviews) -> None:
     candidates = state.candidates(filters)
     signature = tuple(restaurant.id for restaurant in candidates)
     if st.session_state.get("catalog_signature") != signature:
@@ -244,31 +343,9 @@ def render_catalog(state: PickerSession, filters: Filters) -> None:
     st.html('<div id="catalog"></div>')
     st.subheader("餐廳名單", anchor=False)
     st.caption(f"{len(candidates)} 間符合條件 · 每頁 {CATALOG_PAGE_SIZE} 間，可直接在餐廳下方留言")
-    store = None
-    load_error = False
-    reviews = {}
     if visible:
-        try:
-            try:
-                config = st.secrets.get("reviews", {})
-            except FileNotFoundError:
-                config = {}
-            store = configured_review_store(config)
-            if store is not None:
-                reviews = store.load_reviews([restaurant.id for restaurant in visible], limit=3)
-        except ReviewError:
-            load_error = True
-            st.warning("評論暫時無法載入，請稍後再試。")
-        if store is None and not load_error:
-            st.info("評論尚未啟用，請網站管理員完成資料庫設定。")
         with st.container(key="catalog_grid"):
-            for offset in range(0, len(visible), 3):
-                columns = st.columns(3, gap="medium")
-                for column, restaurant in zip(columns, visible[offset:offset + 3]):
-                    with column:
-                        with st.container(border=True, key=f"restaurant_{restaurant.id}"):
-                            st.html(restaurant_card(restaurant))
-                            render_reviews(restaurant, store, reviews.get(restaurant.id, []), load_error=load_error)
+            render_restaurant_cards(visible, access, context="catalog")
         with st.container(horizontal=True, vertical_alignment="center", key="catalog_pagination"):
             st.button("上一頁", key="catalog_previous", disabled=page == 0,
                       on_click=set_catalog_page, args=(page - 1,))
@@ -308,12 +385,14 @@ def main() -> None:
     except (OSError, ValidationError) as exc:
         st.error(f"無法載入內建名單：{exc}")
         st.stop()
+    access = PageReviews()
+    render_search(state, access)
     render_header()
     with st.container(border=True, key="filters_panel"):
         filters = render_filters(state)
     with st.container(border=True, key="pick_panel"):
-        render_recommendation(state, filters)
-    render_catalog(state, filters)
+        render_recommendation(state, filters, access)
+    render_catalog(state, filters, access)
     render_footer(state)
 
 

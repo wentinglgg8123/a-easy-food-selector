@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from food_picker.reviews import (
+    Review,
     ReviewError,
     ReviewValidationError,
     SupabaseReviewStore,
@@ -36,13 +37,18 @@ class FakeSupabase:
         assert 0 < timeout <= 15
         url = urlsplit(request.full_url)
         payload = json.loads(request.data) if request.data is not None else None
-        if url.path == "/rest/v1/rpc/food_picker_reviews_for_restaurants":
+        if url.path in (
+            "/rest/v1/rpc/food_picker_reviews_for_restaurants_v2",
+            "/rest/v1/rpc/food_picker_reviews_for_restaurants",
+        ):
             assert request.method == "POST"
             result = []
             for restaurant_id in payload["restaurant_ids"]:
                 matching = [row for row in self.rows.values() if row["restaurant_id"] == restaurant_id]
                 matching.sort(key=lambda row: (row["created_at"], row["id"]), reverse=True)
                 result.extend(matching[:payload["review_limit"]])
+            if not url.path.endswith("_v2"):
+                result = [{key: value for key, value in row.items() if key != "rating"} for row in result]
         elif request.method == "POST" and url.path == "/rest/v1/restaurant_reviews":
             assert parse_qs(url.query) == {"on_conflict": ["id"]}
             assert request.get_header("Prefer") == "resolution=ignore-duplicates,return=representation"
@@ -51,7 +57,7 @@ class FakeSupabase:
                 result = []
             else:
                 instant = datetime(2026, 10, 22, tzinfo=timezone.utc) + timedelta(seconds=len(self.rows))
-                row = {**payload, "created_at": instant.isoformat()}
+                row = {**payload, "created_at": instant.isoformat(), "rating": payload.get("rating")}
                 self.rows[row["id"]] = row
                 result = [row]
                 if self.fail_after_commit:
@@ -61,7 +67,8 @@ class FakeSupabase:
             query = parse_qs(url.query)
             assert query["limit"] == ["1"]
             row = self.rows.get(query["id"][0].removeprefix("eq."))
-            result = [row] if row else []
+            fields = query["select"][0].split(",")
+            result = [dict(row) if fields == ["*"] else {field: row.get(field) for field in fields}] if row else []
         else:
             pytest.fail("Unexpected remote operation")
         return BytesIO(json.dumps(result, ensure_ascii=False).encode())
@@ -166,7 +173,7 @@ def test_batch_rpc_returns_latest_reviews_per_restaurant_and_empty_groups(remote
     assert result["restaurant-c"] == []
     request = remote.calls[-1][0]
     assert json.loads(request.data) == {"restaurant_ids": ["restaurant-a", "restaurant-b", "restaurant-c"], "review_limit": 3}
-    assert "rpc/food_picker_reviews_for_restaurants" in request.full_url
+    assert request.full_url.endswith("/rpc/food_picker_reviews_for_restaurants_v2")
 
 
 def test_duplicate_submission_uuid_returns_the_persisted_record_without_another_insert(remote):
@@ -247,3 +254,180 @@ def test_remote_rows_cannot_be_attributed_to_a_different_restaurant(remote):
     bad_client = SupabaseReviewStore(URL, KEY, transport=lambda request, timeout: BytesIO(b"[" + unrelated + b"]"))
     with pytest.raises(ReviewError):
         bad_client.load_reviews(["restaurant-a"])
+
+
+@pytest.mark.parametrize("rating", [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
+def test_half_star_ratings_are_persisted_and_loaded_by_another_client(remote, rating):
+    saved = store(remote).add_review("restaurant-a", "甲", "值得推薦", str(uuid4()), rating=rating)
+    loaded = store(remote).load_reviews(["restaurant-a"])["restaurant-a"][0]
+    assert saved.rating == rating and loaded.rating == rating
+    assert remote.rows[saved.id]["rating"] == rating
+
+
+@pytest.mark.parametrize("rating", [True, False, 0, .5, 5.5, 6, 1.25, 3.49999999999, float("inf"), float("-inf"), float("nan"), "3.5"])
+def test_invalid_ratings_are_rejected_before_contacting_supabase(remote, rating):
+    with pytest.raises(ReviewValidationError):
+        store(remote).add_review("restaurant-a", "甲", "好吃", str(uuid4()), rating=rating)
+    assert remote.calls == []
+
+
+def test_legacy_reviews_remain_unrated_without_a_fabricated_default(remote):
+    client = store(remote)
+    token = str(uuid4())
+    legacy = client.add_review("restaurant-a", "甲", "原有評論", token)
+    assert legacy.rating is None
+    assert "rating" not in json.loads(remote.calls[0][0].data)
+    assert remote.rows[token]["rating"] is None
+    assert client.load_reviews(["restaurant-a"])["restaurant-a"][0].rating is None
+    remote.rows[token].pop("rating")
+    assert client.load_reviews(["restaurant-a"])["restaurant-a"][0].rating is None
+    assert Review(token, "restaurant-a", "甲", "舊版呼叫", legacy.created_at).rating is None
+
+
+def test_idempotent_rating_retry_keeps_original_id_timestamp_and_rating(remote):
+    first, second = store(remote), store(remote)
+    token = str(uuid4())
+    saved = first.add_review("restaurant-a", "甲", "好吃", token, rating=3.5)
+    retried = second.add_review("restaurant-a", "甲", "修改後草稿", token, rating=5)
+    assert retried == saved
+    assert retried.rating == 3.5
+    assert retried.id == token and retried.created_at == saved.created_at
+    assert len(remote.rows) == 1
+    assert parse_qs(urlsplit(remote.calls[-1][0].full_url).query)["select"] == ["*"]
+
+
+def test_legacy_idempotent_retry_does_not_assign_a_new_rating_to_an_old_review(remote):
+    client = store(remote)
+    token = str(uuid4())
+    original = client.add_review("restaurant-a", "甲", "舊有評論", token)
+    retried = client.add_review("restaurant-a", "甲", "舊有評論", token, rating=4.5)
+    assert retried == original and retried.rating is None
+    assert remote.rows[token]["rating"] is None
+
+
+@pytest.mark.parametrize("rating", [True, 0, 1.25, 6, "4.5", float("inf"), float("nan")])
+def test_invalid_remote_ratings_are_rejected_without_fabricating_a_star_value(remote, rating):
+    client = store(remote)
+    saved = client.add_review("restaurant-a", "甲", "好吃", str(uuid4()), rating=4.5)
+    remote.rows[saved.id]["rating"] = rating
+    with pytest.raises(ReviewError):
+        client.load_reviews(["restaurant-a"])
+
+
+def test_missing_rating_rpc_keeps_legacy_reviews_visible_and_blocks_rated_writes(remote):
+    original = store(remote).add_review("restaurant-a", "甲", "既有評論", str(uuid4()))
+    calls = []
+
+    def old_database(request, *, timeout):
+        calls.append(request.full_url)
+        if request.full_url.endswith("_v2"):
+            raise HTTPError(request.full_url, 404, "private: " + KEY, {}, None)
+        return remote(request, timeout=timeout)
+
+    client = SupabaseReviewStore(URL, KEY, transport=old_database)
+    assert client.ratings_ready
+    result = client.load_reviews(["restaurant-a"])
+    assert result == {"restaurant-a": [original]}
+    assert result["restaurant-a"][0].rating is None
+    assert not client.ratings_ready
+    assert calls == [
+        URL + "/rest/v1/rpc/food_picker_reviews_for_restaurants_v2",
+        URL + "/rest/v1/rpc/food_picker_reviews_for_restaurants",
+    ]
+    with pytest.raises(ReviewError, match="升級") as failure:
+        client.add_review("restaurant-a", "甲", "新評分評論", str(uuid4()), rating=3.5)
+    assert len(calls) == 2
+    assert KEY not in str(failure.value)
+
+
+def test_later_reads_detect_completed_rating_upgrade_without_changing_existing_rows(remote):
+    saved = store(remote).add_review("restaurant-a", "甲", "半星評論", str(uuid4()), rating=3.5)
+    ready = False
+
+    def upgradeable_database(request, *, timeout):
+        if not ready and request.full_url.endswith("_v2"):
+            raise HTTPError(request.full_url, 404, "missing function", {}, None)
+        return remote(request, timeout=timeout)
+
+    client = SupabaseReviewStore(URL, KEY, transport=upgradeable_database)
+    old_view = client.load_reviews(["restaurant-a"])["restaurant-a"][0]
+    assert not client.ratings_ready and old_view.rating is None
+    assert (old_view.id, old_view.body, old_view.created_at) == (saved.id, saved.body, saved.created_at)
+    ready = True
+    assert client.load_reviews(["restaurant-a"])["restaurant-a"] == [saved]
+    assert client.ratings_ready
+    assert len(remote.rows) == 1
+
+
+@pytest.mark.parametrize("failure", [
+    HTTPError(URL, 401, "private: " + KEY, {}, None),
+    HTTPError(URL, 403, "private: " + KEY, {}, None),
+    HTTPError(URL, 429, "private: " + KEY, {}, None),
+    HTTPError(URL, 500, "private: " + KEY, {}, None),
+    URLError("private: " + KEY), TimeoutError("private: " + KEY),
+])
+def test_other_rating_read_failures_do_not_fall_back_or_hide_the_error(failure):
+    calls = []
+
+    def failed_database(request, *, timeout):
+        calls.append(request.full_url)
+        raise failure
+
+    client = SupabaseReviewStore(URL, KEY, transport=failed_database)
+    with pytest.raises(ReviewError) as error:
+        client.load_reviews(["restaurant-a"])
+    assert calls == [URL + "/rest/v1/rpc/food_picker_reviews_for_restaurants_v2"]
+    assert KEY not in str(error.value)
+
+
+def test_missing_rating_column_never_retries_a_write_without_the_rating():
+    calls = []
+
+    def unmigrated_database(request, *, timeout):
+        calls.append(request)
+        raise HTTPError(request.full_url, 400, "private: " + KEY, {}, None)
+
+    client = SupabaseReviewStore(URL, KEY, transport=unmigrated_database)
+    with pytest.raises(ReviewError):
+        client.add_review("restaurant-a", "甲", "評分評論", str(uuid4()), rating=4.5)
+    assert len(calls) == 1
+    assert json.loads(calls[0].data)["rating"] == 4.5
+
+
+def test_legacy_unrated_insert_and_idempotent_retry_work_before_rating_column_exists(remote):
+    calls = []
+
+    def old_schema(request, *, timeout):
+        calls.append(request)
+        url = urlsplit(request.full_url)
+        if url.path.endswith("_v2"):
+            raise HTTPError(request.full_url, 404, "function does not exist", {}, None)
+        if request.method == "GET":
+            selected = parse_qs(url.query)["select"][0].split(",")
+            if "rating" in selected:
+                raise HTTPError(request.full_url, 400, "column does not exist", {}, None)
+        if request.method == "POST" and url.path == "/rest/v1/restaurant_reviews":
+            assert "rating" not in json.loads(request.data)
+        response = remote(request, timeout=timeout)
+        rows = json.loads(response.read())
+        # The original table genuinely has no rating column in rows or responses.
+        for row in remote.rows.values():
+            row.pop("rating", None)
+        for row in rows:
+            row.pop("rating", None)
+        return BytesIO(json.dumps(rows).encode())
+
+    client = SupabaseReviewStore(URL, KEY, transport=old_schema)
+    assert client.load_reviews(["restaurant-a"]) == {"restaurant-a": []}
+    assert not client.ratings_ready
+    token = str(uuid4())
+    first = client.add_review("restaurant-a", "甲", "舊版未評分評論", token, rating=None)
+    retried = client.add_review("restaurant-a", "甲", "舊版未評分評論", token, rating=None)
+    assert retried == first and first.rating is None
+    assert len(remote.rows) == 1 and "rating" not in remote.rows[token]
+    assert calls[-1].method == "GET"
+    assert parse_qs(urlsplit(calls[-1].full_url).query)["select"] == ["*"]
+    request_count = len(calls)
+    with pytest.raises(ReviewError):
+        client.add_review("restaurant-a", "甲", "新評分評論", str(uuid4()), rating=4.5)
+    assert len(calls) == request_count
