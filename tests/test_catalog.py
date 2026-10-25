@@ -311,12 +311,51 @@ def test_category_multiselect_matches_raw_codes_and_localized_labels(multiselect
     ]
 
 
-def test_price_multiselect_matches_exact_tiers_and_excludes_unknowns(multiselect_catalog):
+def test_price_multiselect_matches_integer_tiers_and_excludes_unknowns(multiselect_catalog):
     filtered = filter_restaurants(multiselect_catalog, Filters(price_levels=(1, 3)))
     assert [restaurant.name for restaurant in filtered] == ["公館拉麵", "師大甜點", "公館牛排"]
     assert "新生拉麵" not in {restaurant.name for restaurant in filtered}
     unrestricted = filter_restaurants(multiselect_catalog, Filters(price_levels=()))
     assert "公館未知價位" in {restaurant.name for restaurant in unrestricted}
+
+
+@pytest.fixture
+def half_price_catalog():
+    return parse_rows([
+        RICH_HEADERS,
+        *[[f"價格{level}店", "小吃部", "便當", level]
+          for level in (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5)],
+        ["未知價格店", "小吃部", "便當", None],
+    ]).restaurants
+
+
+@pytest.mark.parametrize("button, expected", [
+    (1, [1, 1.5]),
+    (2, [1.5, 2, 2.5]),
+    (3, [2.5, 3, 3.5]),
+    (4, [3.5, 4, 4.5]),
+    (5, [4.5, 5]),
+])
+def test_integer_price_buttons_include_only_their_own_tier_and_adjacent_half_tiers(half_price_catalog, button, expected):
+    filtered = filter_restaurants(half_price_catalog, Filters(price_levels=(button,)))
+    assert [restaurant.price_level for restaurant in filtered] == expected
+    assert all(restaurant.price is None for restaurant in filtered)
+    assert [restaurant.price_level for restaurant in half_price_catalog] == [
+        1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, None,
+    ]
+
+
+def test_price_button_union_does_not_duplicate_half_tiers_or_include_unknowns(half_price_catalog):
+    filtered = filter_restaurants(half_price_catalog, Filters(price_levels=(1, 2, 2)))
+    assert [restaurant.price_level for restaurant in filtered] == [1, 1.5, 2, 2.5]
+    assert len({restaurant.id for restaurant in filtered}) == len(filtered)
+    all_known = filter_restaurants(half_price_catalog, Filters(price_levels=(1, 2, 3, 4, 5)))
+    assert all_known == half_price_catalog[:-1]
+    assert filter_restaurants(half_price_catalog, Filters()) == half_price_catalog
+    # Existing programmatic callers can still request an exact fractional source value.
+    assert [restaurant.price_level for restaurant in filter_restaurants(
+        half_price_catalog, Filters(price_levels=(1.5,))
+    )] == [1.5]
 
 
 def test_multiselect_groups_and_flags_are_applied_together(multiselect_catalog):

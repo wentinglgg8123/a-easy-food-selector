@@ -439,8 +439,15 @@ def filter_restaurants(restaurants: Sequence[Restaurant], filters: Filters) -> l
             continue
         if locations and _normalise(restaurant.location) not in locations:
             continue
-        if price_levels and restaurant.price_level not in price_levels:
-            continue
+        if price_levels:
+            level = restaurant.price_level
+            if level is None:
+                continue
+            matching_levels = {level}
+            if level % 1 == 0.5:
+                matching_levels.update((level - 0.5, level + 0.5))
+            if price_levels.isdisjoint(matching_levels):
+                continue
         if filters.max_price_level is not None and (restaurant.price_level is None or restaurant.price_level > filters.max_price_level):
             continue
         if any(getattr(filters, column) and not getattr(restaurant, column) for column in FLAG_COLUMNS):

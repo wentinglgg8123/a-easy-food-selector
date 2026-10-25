@@ -392,7 +392,7 @@ def test_each_filter_group_has_select_all_and_cancel_buttons(page):
     groups = {
         "location_choices": ("地點", 2),
         "category_choices": ("食物種類", 18),
-        "price_choices": ("價格等級", 6),
+        "price_choices": ("價格等級", 5),
         "occasion_choice": ("用餐情境", 3),
         "pace_choice": ("用餐節奏", 2),
     }
@@ -408,6 +408,24 @@ def test_each_filter_group_has_select_all_and_cancel_buttons(page):
     legend = page.get_by_role("list", name="金幣價格範圍說明", exact=True)
     for price_range in ("NT$0–100", "NT$100–200", "NT$200–300", "NT$300–500", "NT$500以上"):
         expect(legend).to_contain_text(price_range)
+    price_buttons = page.get_by_role("toolbar", name="價格等級", exact=True)
+    expect(price_buttons.get_by_role("button")).to_have_count(5)
+    expect(price_buttons).not_to_contain_text("1.5")
+    _select_pills(page, "價格等級", ["🪙"])
+    _expect_count(page, 8)
+    expect(page.locator(".st-key-catalog_grid").get_by_role("heading", name="7-ELEVEN", exact=True)).to_be_visible()
+    _toggle_pill_off(page, "價格等級", "🪙")
+    _select_pills(page, "價格等級", ["🪙🪙"])
+    _expect_count(page, 7)
+    expect(page.locator(".st-key-catalog_grid").get_by_role("heading", name="7-ELEVEN", exact=True)).to_be_visible()
+    _select_pills(page, "價格等級", ["🪙"])
+    _expect_count(page, 10)
+    _toggle_pill_off(page, "價格等級", "🪙")
+    _query(page, "7-ELEVEN")
+    _expect_count(page, 1)
+    page.get_by_role("button", name="幫我決定這一餐", exact=True).click()
+    expect(page.locator(f"{RESULT} h2")).to_have_text("7-ELEVEN")
+    expect(page.locator(RESULT).get_by_role("img", name="1.5 枚金幣", exact=True)).to_be_visible()
 
 
 def test_all_catalog_pages_have_per_restaurant_comment_forms(page):

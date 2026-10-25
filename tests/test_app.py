@@ -227,7 +227,7 @@ def test_each_filter_group_can_select_all_and_clear_without_affecting_other_grou
     groups = {
         "location_choices": 2,
         "category_choices": 18,
-        "price_choices": 6,
+        "price_choices": 5,
         "occasion_choice": 3,
         "pace_choice": 2,
     }
@@ -246,17 +246,29 @@ def test_each_filter_group_can_select_all_and_clear_without_affecting_other_grou
 def test_coin_prices_have_the_range_legend_and_readable_table_values(app):
     displayed = [" ".join(part for part in (option.content_icon, option.content) if part)
                  for option in app.pills(key="price_choices").proto.options]
-    assert displayed == ["🪙", "🪙 × 1.5", "🪙🪙", "🪙🪙🪙", "🪙🪙🪙🪙", "🪙🪙🪙🪙🪙"]
+    assert displayed == ["🪙" * level for level in range(1, 6)]
     legend = next(html.value for html in app.get("html") if "price-legend" in html.value)
     for price_range in ("0–100", "100–200", "200–300", "300–500", "500以上"):
         assert price_range in legend
     table = app.dataframe[0].value
     assert table.iloc[0]["價格"] == "🪙 · NT$0–100"
     assert "價格等級" not in table.columns
-    app.pills(key="price_choices").set_value([1.5]).run()
+    half_price_names = {"7-ELEVEN", "漢城異國美食", "蘇記牛肉麵", "一番快餐", "好富熟成黑咖哩.台式蓋飯"}
+    for level, count, excluded in ((1, 8, {"麥當勞", "杜蘭小麥 - 義大利麵.披薩"}),
+                                   (2, 7, {"包子商行", "比司多早午餐", "珈名鮮茶"})):
+        app.pills(key="price_choices").set_value([level]).run()
+        assert not app.exception and len(names(app)) == count
+        assert half_price_names <= set(names(app))
+        assert excluded.isdisjoint(names(app))
+    app.pills(key="price_choices").set_value([1, 2]).run()
+    assert not app.exception and len(names(app)) == len(set(names(app))) == 10
+    app.pills(key="price_choices").set_value([2])
+    app.text_input(key="query_choice").set_value("7-ELEVEN").run()
+    app.button(key="pick_meal").click().run()
     assert not app.exception
-    assert names(app) == ["7-ELEVEN", "漢城異國美食", "蘇記牛肉麵", "一番快餐", "好富熟成黑咖哩.台式蓋飯"]
-    assert all("1.5" in value and "NT$" not in value for value in app.dataframe[0].value["價格"])
+    assert app.session_state["picker"].selected.name == "7-ELEVEN"
+    assert app.session_state["picker"].selected.price_level == 1.5
+    assert any('aria-label="1.5 枚金幣"' in item.value for item in app.get("html"))
 
 
 def test_catalog_pagination_exposes_six_comment_forms_per_page(app):

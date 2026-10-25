@@ -284,8 +284,8 @@ def render_filters(state: PickerSession) -> Filters:
         render_filter_group("食物種類", sorted({category for r in state.restaurants for category in restaurant_categories(r)}), "category_choices")
     prices, occasions, paces = st.columns([1.2, 1, 1], gap="large")
     with prices:
-        levels = sorted(set(range(1, 6)) | {r.price_level for r in state.restaurants if r.price_level is not None})
-        render_filter_group("價格等級", levels, "price_choices", coin_label)
+        render_filter_group("價格等級", list(range(1, 6)), "price_choices", coin_label)
+        st.caption("半枚級距同時符合相鄰兩組，例如 1.5 可選 1 或 2 枚。")
     with occasions:
         render_filter_group("用餐情境", ["一個人吃", "約會", "聚餐"], "occasion_choice")
         st.caption("需同時符合所選情境")
