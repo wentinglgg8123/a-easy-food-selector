@@ -361,32 +361,38 @@ def test_clear_search_only_clears_query_and_search_pagination(app):
     assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
 
 
-def test_homophone_typo_suggests_a_real_store_without_changing_the_query_until_clicked(app):
+def test_homophone_typo_directly_shows_a_real_store_and_review_form_in_search_results(app):
     restaurant = next(r for r in app.session_state["picker"].restaurants if r.name == "孫東寶牛排")
     app.pills(key="location_choices").set_value(["Shida"]).run()
     app.text_input(key="query_choice").set_value("孫東保牛排").run()
     assert not app.exception
     assert app.text_input(key="query_choice").value == "孫東保牛排"
-    suggestion = app.button(key=f"search_suggestion_{restaurant.id}")
-    assert suggestion.label == "孫東寶牛排"
-    assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
-    suggestion.click().run()
-    assert not app.exception
-    assert app.text_input(key="query_choice").value == "孫東寶牛排"
     assert app.pills(key="location_choices").value == ["Shida"]
     assert names(app) == []
     assert app.text_area(key=f"review_body_search_{restaurant.id}").value == ""
+    assert app.text_input(key=f"review_author_search_{restaurant.id}").label == "您的暱稱"
     assert app.slider(key=f"review_rating_search_{restaurant.id}").proto.step == 0.5
+    assert [caption.value for caption in app.caption if "讀音或字詞相近" in caption.value] == [
+        "找到 1 間讀音或字詞相近的店家"
+    ]
+    assert sum(heading.value == "搜尋結果" for heading in app.subheader) == 1
+    assert not any("你是不是想找" in heading.value for heading in app.subheader)
+    assert not any("找到 0 間" in caption.value for caption in app.caption)
+    assert not any("找不到完全符合" in info.value for info in app.info)
     assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
 
 
-def test_unrelated_and_empty_queries_do_not_show_store_suggestions(app):
+def test_unrelated_query_shows_empty_search_message_and_clearing_hides_results(app):
     app.text_input(key="query_choice").set_value("ZXQ987654321外太空不存在的店").run()
     assert not app.exception
-    assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
+    assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
+    assert any("找不到相近的店家" in info.value for info in app.info)
+    assert sum(heading.value == "搜尋結果" for heading in app.subheader) == 1
     app.button(key="clear_search_query").click().run()
     assert not app.exception and app.text_input(key="query_choice").value == ""
-    assert not any((button.key or "").startswith("search_suggestion_") for button in app.button)
+    assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
+    assert not any("找不到相近的店家" in info.value for info in app.info)
+    assert not any(heading.value == "搜尋結果" for heading in app.subheader)
     assert len(names(app)) == 175
 
 

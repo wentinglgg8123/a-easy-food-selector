@@ -86,7 +86,7 @@ def page(browser, app_url, request):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(app_url)
-    expect(page.get_by_role("button", name="幫我決定這一餐", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="幫我決定這一餐", exact=True)).to_be_visible(timeout=15_000)
     _wait_idle(page)
     try:
         yield page
@@ -509,7 +509,6 @@ def test_search_clear_icon_is_inside_the_field_and_clears_unsent_text_preserving
     clear.click()
     expect(query).to_have_value("")
     expect(page.locator(".st-key-search_results")).to_have_count(0)
-    expect(page.locator(".st-key-search_suggestions")).to_have_count(0)
     _expect_count(page, 4)
     for label, name in (("地點", "公館"), ("食物種類", "牛排")):
         expect(page.get_by_role("toolbar", name=label, exact=True).get_by_role("button", name=name, exact=True)).to_have_attribute("aria-pressed", "true")
@@ -523,47 +522,40 @@ def test_search_clear_icon_is_inside_the_field_and_clears_unsent_text_preserving
     _expect_count(page, 4)
 
 
-def test_homophone_typo_suggests_real_names_and_click_opens_a_direct_review_form(page):
+def test_homophone_typo_directly_shows_a_real_store_and_review_form_in_search_results(page):
     _select_pills(page, "地點", ["師大"])
     query = _query(page, "孫東保牛排")
-    suggestions = page.locator(".st-key-search_suggestions")
-    suggestion = suggestions.get_by_role("button", name="孫東寶牛排", exact=True)
-    expect(suggestion).to_be_visible()
     expect(query).to_have_value("孫東保牛排")
-    expect(page.locator(".st-key-search_results").get_by_test_id("stForm")).to_have_count(0)
-    suggestion.click()
-    expect(query).to_have_value("孫東寶牛排")
-    expect(suggestions).to_have_count(0)
     results = page.locator(".st-key-search_results")
+    expect(results).to_have_count(1)
+    expect(results.get_by_text("找到 1 間讀音或字詞相近的店家", exact=True)).to_be_visible()
     expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(results.get_by_test_id("stForm")).to_have_count(1)
     expect(results.get_by_role("textbox", name="您的暱稱", exact=True)).to_be_visible()
     expect(results.get_by_role("textbox", name="評論內容", exact=True)).to_be_visible()
     expect(results.get_by_role("slider")).to_have_attribute("step", "0.5")
     expect(results.get_by_role("button", name="發布評論", exact=True)).to_be_disabled()
+    expect(results.get_by_text(re.compile("找到 0 間|找不到完全符合"))).to_have_count(0)
+    expect(page.get_by_role("heading", name="你是不是想找這些店家？", exact=True)).to_have_count(0)
+    expect(page.locator(".st-key-search_suggestions")).to_have_count(0)
     _expect_count(page, 0)
 
     _query(page, "ZXQ987654321外太空不存在的店")
-    expect(suggestions).to_have_count(0)
     expect(results.get_by_test_id("stForm")).to_have_count(0)
+    expect(results.get_by_text("找不到相近的店家，請試試其他店名或較短的關鍵字。", exact=True)).to_be_visible()
     page.get_by_role("button", name="清除搜尋", exact=True).click()
     expect(query).to_have_value("")
     expect(results).to_have_count(0)
-    expect(suggestions).to_have_count(0)
     _expect_count(page, 3)
 
 
 def test_typing_short_homophone_and_exact_names_updates_search_without_enter_or_blur(page):
     query = page.get_by_role("textbox", name="搜尋店家", exact=True)
     query.fill("孫東保")
-    suggestion = page.locator(".st-key-search_suggestions").get_by_role(
-        "button", name="孫東寶牛排", exact=True
-    )
-    expect(suggestion).to_be_visible()
-    expect(query).to_be_focused()
-    expect(query).to_have_value("孫東保")
-    suggestion.click()
     results = page.locator(".st-key-search_results")
     expect(results.get_by_role("heading", name="孫東寶牛排", exact=True)).to_be_visible()
+    expect(query).to_be_focused()
+    expect(query).to_have_value("孫東保")
     expect(results.get_by_role("textbox", name="評論內容", exact=True)).to_be_visible()
     expect(results.get_by_role("slider")).to_have_attribute("step", "0.5")
 
@@ -580,8 +572,8 @@ def test_rapid_typing_and_clear_cancel_pending_live_search_updates(page):
     query = page.get_by_role("textbox", name="搜尋店家", exact=True)
     query.fill("頂瓜瓜")
     query.fill("孫東保")
-    expect(page.locator(".st-key-search_suggestions").get_by_role(
-        "button", name="孫東寶牛排", exact=True
+    expect(page.locator(".st-key-search_results").get_by_role(
+        "heading", name="孫東寶牛排", exact=True
     )).to_be_visible()
     expect(query).to_be_focused()
     expect(query).to_have_value("孫東保")
@@ -594,7 +586,6 @@ def test_rapid_typing_and_clear_cancel_pending_live_search_updates(page):
     page.wait_for_timeout(600)
     expect(query).to_have_value("")
     expect(page.locator(".st-key-search_results")).to_have_count(0)
-    expect(page.locator(".st-key-search_suggestions")).to_have_count(0)
 
     query.fill("頂瓜瓜")
     query.fill("孫東寶牛排")

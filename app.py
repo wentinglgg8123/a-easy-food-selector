@@ -100,12 +100,6 @@ def clear_search() -> None:
     st.session_state.pop("search_signature", None)
 
 
-def use_search_suggestion(name: str) -> None:
-    st.session_state["query_choice"] = name
-    st.session_state["search_page"] = 0
-    st.session_state.pop("search_signature", None)
-
-
 def read_filters() -> Filters:
     occasions = st.session_state.get("occasion_choice", [])
     paces = st.session_state.get("pace_choice", [])
@@ -207,6 +201,10 @@ def render_search(state: PickerSession, access: PageReviews) -> None:
     if not normalized:
         return
     matches = find_restaurants(state.restaurants, query)
+    similar = False
+    if not matches:
+        matches = suggest_restaurants(state.restaurants, query)
+        similar = bool(matches)
     signature = (normalized, tuple(r.id for r in matches))
     if st.session_state.get("search_signature") != signature:
         st.session_state["search_signature"] = signature
@@ -216,8 +214,11 @@ def render_search(state: PickerSession, access: PageReviews) -> None:
     visible = matches[page * SEARCH_PAGE_SIZE:(page + 1) * SEARCH_PAGE_SIZE]
     with st.container(key="search_results"):
         st.subheader("搜尋結果", anchor=False)
-        st.caption(f"找到 {len(matches)} 間店家 · 搜尋整份名單，不受下方篩選限制")
         if visible:
+            st.caption(
+                f"找到 {len(matches)} 間讀音或字詞相近的店家"
+                if similar else f"找到 {len(matches)} 間店家 · 搜尋整份名單，不受下方篩選限制"
+            )
             render_restaurant_cards(visible, access, context="search")
             if page_count > 1:
                 with st.container(horizontal=True, vertical_alignment="center", key="search_pagination"):
@@ -227,18 +228,7 @@ def render_search(state: PickerSession, access: PageReviews) -> None:
                     st.button("下一頁搜尋結果", key="search_next", disabled=page + 1 >= page_count,
                               on_click=set_search_page, args=(page + 1,))
         else:
-            st.info("找不到完全符合的店家，試試下方建議，或輸入較短的店名。")
-            suggestions = suggest_restaurants(state.restaurants, query)
-            if suggestions:
-                with st.container(key="search_suggestions"):
-                    st.subheader("你是不是想找這些店家？", anchor=False)
-                    st.caption("依相似讀音與字詞提供建議；點選店名即可查看並評論。")
-                    for restaurant in suggestions:
-                        st.button(
-                            restaurant.name, key=f"search_suggestion_{restaurant.id}",
-                            icon=":material/search:", width="stretch",
-                            on_click=use_search_suggestion, args=(restaurant.name,),
-                        )
+            st.info("找不到相近的店家，請試試其他店名或較短的關鍵字。")
 
 
 def render_source(state: PickerSession) -> None:
