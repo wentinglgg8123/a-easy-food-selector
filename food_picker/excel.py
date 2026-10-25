@@ -28,6 +28,7 @@ EXCEL_HEADERS = (
     "Coordinates",
     "Comments",
 )
+SCHEDULE_HEADERS = ("Available time", "special available time")
 LEGACY_HEADERS = (
     "餐廳名稱",
     "區域",
@@ -129,17 +130,24 @@ def _write_workbook(headers: Sequence[str], rows: Sequence[Sequence[object]]) ->
         cell.fill = PatternFill("solid", fgColor="E5EBDD")
         cell.alignment = Alignment(vertical="center")
     sheet.row_dimensions[1].height = 25
-    widths = (30, 21, 22, 12, 14, 12, 14, 14, 14, 43, 54, 16, 14, 18, 38)
+    widths = (30, 21, 32, 12, 14, 12, 14, 14, 14, 43, 54)
     for index, width in enumerate(widths[:len(headers)], 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
+    for index, header in enumerate(headers[11:], 12):
+        sheet.column_dimensions[get_column_letter(index)].width = (
+            38 if header in SCHEDULE_HEADERS or header == "地址" else 18
+        )
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    sheet["B1"].comment = Comment("保留原始地區代碼，例如 Gongguan、School；不會自動判定清大周邊距離。", "食刻決定")
-    sheet["D1"].comment = Comment("價格級距：請填 1 至 5；這不是新臺幣金額，不知道時可留白。", "食刻決定")
+    sheet["B1"].comment = Comment("保留原始地點，例如小吃部、清夜，或 Gongguan 等舊版代碼；不會自動判定清大周邊距離。", "食刻決定")
+    sheet["D1"].comment = Comment("價格級距：請填 1 至 5，可用 1.5 等半級；這不是新臺幣金額，不知道時可留白。", "食刻決定")
     for column in "EFGHI":
         sheet[f"{column}1"].comment = Comment("適合此情境時填 O，不適合或未知時留白。", "食刻決定")
     sheet["J1"].comment = Comment("緯度, 經度，例如 25.0182, 121.5310；不知道時可留白。", "食刻決定")
     sheet["K1"].comment = Comment("店家備註會原樣保留；包含「關門了」等歇業提醒的店家不會被推薦。", "食刻決定")
+    for index, header in enumerate(headers, 1):
+        if header in SCHEDULE_HEADERS:
+            sheet.cell(1, index).comment = Comment("保留提供的營業時間文字，不會依此自動判斷目前是否營業。", "食刻決定")
     output = BytesIO()
     try:
         workbook.save(output)
@@ -158,6 +166,9 @@ def export_restaurants(restaurants: Sequence[Restaurant]) -> bytes:
         for restaurant in restaurants
     )
     headers = EXCEL_HEADERS + (("區域", "均消", "距離（公里）", "地址") if legacy_extensions else ())
+    schedules = any(restaurant.opening_hours or restaurant.special_opening_hours for restaurant in restaurants)
+    if schedules:
+        headers += SCHEDULE_HEADERS
     rows = []
     for restaurant in restaurants:
         coordinates = (
@@ -180,13 +191,15 @@ def export_restaurants(restaurants: Sequence[Restaurant]) -> bytes:
         if legacy_extensions:
             area = {"campus": "清大校內", "nearby": "校園周邊"}.get(restaurant.area, "")
             values += (area, restaurant.price, restaurant.distance, restaurant.address)
+        if schedules:
+            values += (restaurant.opening_hours, restaurant.special_opening_hours)
         rows.append(values)
     return _write_workbook(headers, rows)
 
 
 def build_template() -> bytes:
-    """Return the eleven-column schema with two explicitly fictional examples."""
-    return _write_workbook(EXCEL_HEADERS, [
-        ("示範・一人食堂", "Gongguan", "Bento", 1, "O", "", "", "O", "", "", "虛構示範資料，非真實店家"),
-        ("示範・聚餐小館", "School", "Chinese", 3, "", "O", "O", "", "O", "", "虛構示範資料，非真實店家"),
+    """Return the import schema and opening hours with two fictional examples."""
+    return _write_workbook(EXCEL_HEADERS + SCHEDULE_HEADERS, [
+        ("示範・一人食堂", "小吃部", "早餐, 中式料理", 1.5, "O", "", "", "O", "", "", "虛構示範資料，非真實店家", "7:00~19:00", "假日營業時間另行公告"),
+        ("示範・聚餐小館", "清夜", "Chinese", 3, "", "O", "O", "", "O", "", "虛構示範資料，非真實店家", "11:00~20:00", ""),
     ])

@@ -22,7 +22,7 @@ class Restaurant:
     note: str
     location: str = ""
     genre: str = ""
-    price_level: int | None = None
+    price_level: float | None = None
     one_person: bool = False
     dating: bool = False
     gathering: bool = False
@@ -31,6 +31,8 @@ class Restaurant:
     latitude: float | None = None
     longitude: float | None = None
     is_closed: bool = False
+    opening_hours: str = ""
+    special_opening_hours: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Return plain values suitable for JSON and spreadsheet exports."""
@@ -44,7 +46,7 @@ class Filters:
     max_price: float | None = None
     query: str = ""
     location: str = "all"
-    max_price_level: int | None = None
+    max_price_level: float | None = None
     one_person: bool = False
     dating: bool = False
     gathering: bool = False
@@ -53,7 +55,7 @@ class Filters:
     include_closed: bool = False
     locations: tuple[str, ...] = ()
     categories: tuple[str, ...] = ()
-    price_levels: tuple[int, ...] = ()
+    price_levels: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -6,13 +6,13 @@ from unicodedata import normalize
 
 import streamlit as st
 
-from food_picker.catalog import location_label
+from food_picker.catalog import location_label, restaurant_categories
 from food_picker.defaults import DEFAULT_DATA_PATH
 from food_picker.excel import build_template, export_restaurants, parse_excel
 from food_picker.models import Filters, Restaurant, ValidationError
 from food_picker.presentation import (
-    area_label, coin_label, feature_labels, food_icon, map_url, poster_tone,
-    price_label, price_legend_html, restaurant_card, table_rows,
+    area_label, coin_label, feature_labels, food_icon, hours_html, map_url, poster_tone,
+    price_html, price_legend_html, restaurant_card, table_rows,
 )
 from food_picker.reviews import ReviewError, configured_review_store
 from food_picker.review_ui import render_reviews
@@ -153,8 +153,8 @@ def import_dialog() -> None:
             st.session_state["upload_generation"] = st.session_state.get("upload_generation", 0) + 1
             st.rerun()
     st.markdown("**支援這份名單的完整欄位：**")
-    st.code("Restaurant, Location, Genre, Price, OnePerson, Dating,\nGathering, FastServe, SlowEat, Coordinates, Comments", language=None)
-    st.caption("Price 填 1–5，依畫面上的金幣與價格區間對照；用餐情境／節奏填 O 表示有標記。Coordinates 填「緯度, 經度」。舊版中文欄位格式也可使用。")
+    st.code("Restaurant, Location, Genre（或 Gener）, Price, OnePerson, Dating,\nGathering, FastServe, SlowEat, Coordinates, Comments,\nAvailable time, special available time", language=None)
+    st.caption("Price 填 1–5，可用 0.5 級距；1.5 顯示一枚半金幣。料理可用逗號分隔多種類別；用餐情境／節奏填 O 表示有標記。營業時間直接填文字，Coordinates 可留白。舊版中文欄位格式也可使用。")
     st.download_button(
         "下載 Excel 範本", template_bytes(), file_name="食刻決定_餐廳名單範本.xlsx",
         mime=MIME_XLSX, on_click="ignore", key="dialog_template", icon=":material/download:",
@@ -281,10 +281,11 @@ def render_filters(state: PickerSession) -> Filters:
     with places:
         render_filter_group("地點", locations, "location_choices", location_label)
     with cuisines:
-        render_filter_group("食物種類", sorted({r.category for r in state.restaurants}), "category_choices")
+        render_filter_group("食物種類", sorted({category for r in state.restaurants for category in restaurant_categories(r)}), "category_choices")
     prices, occasions, paces = st.columns([1.2, 1, 1], gap="large")
     with prices:
-        render_filter_group("價格等級", list(range(1, 6)), "price_choices", coin_label)
+        levels = sorted(set(range(1, 6)) | {r.price_level for r in state.restaurants if r.price_level is not None})
+        render_filter_group("價格等級", levels, "price_choices", coin_label)
     with occasions:
         render_filter_group("用餐情境", ["一個人吃", "約會", "聚餐"], "occasion_choice")
         st.caption("需同時符合所選情境")
@@ -320,7 +321,8 @@ def render_recommendation(state: PickerSession, filters: Filters, access: PageRe
             f'<span class="result-icon">{food_icon(current)}</span></div>'
             '<div class="result-copy"><p class="result-eyebrow">這次推薦給你</p>'
             f'<h2>{escape(current.name)}</h2>'
-            f'<div class="result-meta"><a class="location-link" href="{escape(map_url(current), quote=True)}" target="_blank" rel="noopener noreferrer" aria-label="在 Google 地圖搜尋{escape(current.name, quote=True)}">{escape(current.address or area_label(current))} ↗</a><span>{escape(current.category)}</span><span>{escape(price_label(current))}</span></div>'
+            f'<div class="result-meta"><a class="location-link" href="{escape(map_url(current), quote=True)}" target="_blank" rel="noopener noreferrer" aria-label="在 Google 地圖搜尋{escape(current.name, quote=True)}">{escape(current.address or area_label(current))} ↗</a><span>{escape(current.category)}</span><span>{price_html(current)}</span></div>'
+            f'{hours_html(current)}'
             f'<div class="result-tags">{tags}</div>'
             f'<p class="result-note">{escape(current.note or "名單沒有額外備註，出發前記得確認營業資訊。")}</p>'
             '</div></section>'
@@ -391,7 +393,7 @@ def render_catalog(state: PickerSession, filters: Filters, access: PageReviews) 
 
 def render_footer(state: PickerSession) -> None:
     render_source(state)
-    st.download_button("下載完整名單", DEFAULT_DATA_PATH.read_bytes(), file_name="食物.xlsx", mime=MIME_XLSX, on_click="ignore", icon=":material/download:")
+    st.download_button("下載完整名單", DEFAULT_DATA_PATH.read_bytes(), file_name="清大食上傳.xlsx", mime=MIME_XLSX, on_click="ignore", icon=":material/download:")
     st.caption("金幣依你指定的價格區間對照 Excel 分級；未填價格不推測。店家資訊與實際消費請以現場為準。")
     st.caption("內建名單供所有訪客使用；你額外匯入的名單僅存於自己的工作階段，重新整理後會恢復內建名單。")
 

@@ -8,14 +8,13 @@ import random
 import pytest
 
 from food_picker.catalog import (
-    GENRE_LABELS,
-    LOCATION_LABELS,
     choose_restaurant,
     demo_restaurants,
     filter_restaurants,
     genre_label,
     location_label,
     parse_rows,
+    restaurant_categories,
 )
 from food_picker.models import Filters, ValidationError
 
@@ -172,14 +171,14 @@ def test_rich_schema_retains_all_fields_and_keeps_tiers_separate_from_currency()
     assert result.warnings == []
 
 
-@pytest.mark.parametrize("value, expected", [(1, 1), (5.0, 5), ("３", 3), ("2.0", 2), (None, None), ("", None)])
-def test_price_levels_are_optional_integral_values_from_one_to_five(value, expected):
+@pytest.mark.parametrize("value, expected", [(1, 1), (1.5, 1.5), (2.5, 2.5), (5.0, 5), ("３", 3), ("2.0", 2), ("１．５", 1.5), (None, None), ("", None)])
+def test_price_levels_are_optional_half_steps_from_one_to_five(value, expected):
     restaurant = parse_rows([RICH_HEADERS, ["餐廳", "School", "Bento", value]]).restaurants[0]
     assert restaurant.price_level == expected
     assert restaurant.price is None
 
 
-@pytest.mark.parametrize("value", [0, 6, 2.5, True, "NT$ 2", "1e0", "-1", "2-3"])
+@pytest.mark.parametrize("value", [0, 6, 1.25, True, "NT$ 2", "1e0", "-1", "2-3"])
 def test_invalid_price_level_skips_only_the_affected_restaurant(value):
     result = parse_rows([RICH_HEADERS, ["無效", "Gongguan", "Ramen", value], ["有效", "Gongguan", "Ramen", 2]])
     assert [restaurant.name for restaurant in result.restaurants] == ["有效"]
@@ -368,20 +367,40 @@ def test_bundled_workbook_retains_all_rows_codes_and_fields():
         finally:
             workbook.close()
     restaurants = result.restaurants
-    assert len(restaurants) == 176
-    assert len({restaurant.location for restaurant in restaurants}) == 8
-    assert len({restaurant.genre for restaurant in restaurants}) == 25
-    assert {restaurant.location for restaurant in restaurants} == set(LOCATION_LABELS)
-    assert {restaurant.genre for restaurant in restaurants} == set(GENRE_LABELS)
+    assert len(restaurants) == 10
+    assert {restaurant.location for restaurant in restaurants} == {"小吃部", "清夜"}
+    assert len({category for restaurant in restaurants for category in restaurant_categories(restaurant)}) == 18
     assert all(restaurant.area == "other" and restaurant.price is None for restaurant in restaurants)
-    assert all(restaurant.latitude is not None and restaurant.longitude is not None for restaurant in restaurants)
-    assert sum(restaurant.price_level is None for restaurant in restaurants) == 4
-    assert sum(restaurant.one_person for restaurant in restaurants) == 163
-    assert sum(restaurant.dating for restaurant in restaurants) == 4
-    assert sum(restaurant.gathering for restaurant in restaurants) == 24
-    assert sum(restaurant.fast_serve for restaurant in restaurants) == 14
-    assert sum(restaurant.slow_eat for restaurant in restaurants) == 8
+    assert all(restaurant.latitude is None and restaurant.longitude is None for restaurant in restaurants)
+    assert sum(restaurant.price_level == 1.5 for restaurant in restaurants) == 5
+    assert sum(restaurant.one_person for restaurant in restaurants) == 9
+    assert sum(restaurant.dating for restaurant in restaurants) == 0
+    assert sum(restaurant.gathering for restaurant in restaurants) == 2
+    assert sum(restaurant.fast_serve for restaurant in restaurants) == 9
+    assert sum(restaurant.slow_eat for restaurant in restaurants) == 1
+    assert sum(bool(restaurant.opening_hours) for restaurant in restaurants) == 9
+    assert sum(bool(restaurant.special_opening_hours) for restaurant in restaurants) == 2
     closed = [restaurant for restaurant in restaurants if restaurant.is_closed]
-    assert [restaurant.name for restaurant in closed] == ["郭董麻辣牛肉麵"]
-    assert len(filter_restaurants(restaurants, Filters())) == 175
+    assert closed == []
+    assert len(filter_restaurants(restaurants, Filters())) == 10
+    assert result.warnings == []
+
+
+def test_multi_genre_rows_accept_the_uploaded_header_and_filter_by_each_individual_cuisine():
+    result = parse_rows([
+        ["Restaurant", "Location", "Gener", "Price", "Available time", "special available time"],
+        ["早餐店", "小吃部", "早餐, 早午餐，中式料理", 1.5, "7:30~19:30", "假日8:30~14:30"],
+        ["速食店", "小吃部", "美式料理, 炸物, 速食", 2, "7:00~24:00", None],
+    ])
+    breakfast, fastfood = result.restaurants
+    assert breakfast.genre == "早餐, 早午餐，中式料理"
+    assert restaurant_categories(breakfast) == ("早餐", "早午餐", "中式料理")
+    assert breakfast.price_level == 1.5 and breakfast.price is None
+    assert breakfast.opening_hours == "7:30~19:30"
+    assert breakfast.special_opening_hours == "假日8:30~14:30"
+    assert filter_restaurants(result.restaurants, Filters(categories=("早餐",))) == [breakfast]
+    assert filter_restaurants(result.restaurants, Filters(category="中式料理")) == [breakfast]
+    assert filter_restaurants(result.restaurants, Filters(categories=("中式料理", "速食"))) == [breakfast, fastfood]
+    assert filter_restaurants(result.restaurants, Filters(price_levels=(1.5,))) == [breakfast]
+    assert filter_restaurants(result.restaurants, Filters(categories=("速食",), price_levels=(1.5,))) == []
     assert result.warnings == []

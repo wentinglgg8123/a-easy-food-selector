@@ -55,7 +55,7 @@ def page(monkeypatch, api):
 
 
 def search_and_pick(app):
-    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    app.text_input(key="query_choice").set_value(load_default_catalog().restaurants[0].name).run()
     app.button(key="pick_meal").click().run()
     assert not app.exception
     return app.session_state["picker"].selected.id
@@ -86,7 +86,7 @@ def test_real_callback_saves_half_star_review_once_and_shares_it_across_contexts
     reads = [data["restaurant_ids"] for _, path, data in api.calls if path.endswith("_v2")]
     assert reads == [[restaurant_id]]
     visitor = page(monkeypatch, api)
-    visitor.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    visitor.text_input(key="query_choice").set_value(load_default_catalog().restaurants[0].name).run()
     assert not visitor.exception
     assert html(visitor).count('aria-label="1.5 / 5 顆星"') == 2
     assert "從推薦結果發布的共用評論" in html(visitor)

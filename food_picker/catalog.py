@@ -66,6 +66,8 @@ COLUMN_NAMES = {
     "fast_serve": "FastServe（快速用餐）",
     "slow_eat": "SlowEat（慢慢享用）",
     "coordinates": "Coordinates（座標）",
+    "opening_hours": "Available time（營業時間）",
+    "special_opening_hours": "special available time（特殊營業時間）",
 }
 COLUMN_ALIASES = {
     "name": ("餐廳名稱", "店家名稱", "餐廳", "店名", "名稱", "name", "restaurant name"),
@@ -79,6 +81,7 @@ COLUMN_ALIASES = {
 TEXT_LIMITS = {
     "name": 200, "area": 80, "category": 80, "address": 500, "note": 2_000,
     "location": 80, "genre": 80,
+    "opening_hours": 500, "special_opening_hours": 500,
 }
 _NUMBER = re.compile(r"(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)", re.ASCII)
 
@@ -106,6 +109,17 @@ def genre_label(code: str) -> str:
     return _label(code, GENRE_LABELS, "未分類")
 
 
+def _genre_categories(value: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(
+        genre_label(part.strip()) for part in re.split(r"[,，、]", value) if part.strip()
+    ))
+
+
+def restaurant_categories(restaurant: Restaurant) -> tuple[str, ...]:
+    """Expose each cuisine tag while preserving the original spreadsheet genre."""
+    return _genre_categories(restaurant.genre or restaurant.category) or ("未分類",)
+
+
 _HEADER_COLUMNS = {
     _header_key(alias): column
     for column, aliases in COLUMN_ALIASES.items()
@@ -114,7 +128,7 @@ _HEADER_COLUMNS = {
 _RICH_COLUMN_ALIASES = {
     "name": ("Restaurant",),
     "location": ("Location",),
-    "genre": ("Genre",),
+    "genre": ("Genre", "Gener"),
     "price_level": ("Price", "PriceLevel"),
     "one_person": ("OnePerson",),
     "dating": ("Dating",),
@@ -123,6 +137,8 @@ _RICH_COLUMN_ALIASES = {
     "slow_eat": ("SlowEat",),
     "coordinates": ("Coordinates",),
     "note": ("Comments",),
+    "opening_hours": ("Available time", "營業時間"),
+    "special_opening_hours": ("special available time", "特殊營業時間"),
 }
 _RICH_HEADER_COLUMNS = {
     **_HEADER_COLUMNS,
@@ -132,7 +148,7 @@ _RICH_HEADER_COLUMNS = {
         for alias in aliases
     },
 }
-_RICH_MARKERS = {"restaurant", "location", "genre", "oneperson", "dating", "gathering", "fastserve", "sloweat", "coordinates", "comments", "pricelevel"}
+_RICH_MARKERS = {"restaurant", "location", "genre", "gener", "oneperson", "dating", "gathering", "fastserve", "sloweat", "coordinates", "comments", "pricelevel", "availabletime", "specialavailabletime"}
 _CAMPUS = {
     "校內", "學餐", "校內學餐", "清大校內", "清華校內", "清華大學校內",
     "國立清華大學校內", "campus", "oncampus",
@@ -221,21 +237,21 @@ def _area(value: object) -> Area:
     raise ValidationError("「區域」請填寫「校內」或「校外」，已略過")
 
 
-def _price_level(value: object) -> int | None:
+def _price_level(value: object) -> float | None:
     if _blank(value):
         return None
-    message = "「Price」必須是 1 到 5 的整數價位等級，不代表新台幣金額，已略過"
+    message = "「Price」必須是 1 到 5、以 0.5 遞增的價位等級，不代表新台幣金額，已略過"
     if isinstance(value, str):
         value = unicodedata.normalize("NFKC", value).strip()
-        if not re.fullmatch(r"\d+(?:\.0+)?", value, flags=re.ASCII):
+        if not re.fullmatch(r"\d+(?:\.\d+)?", value, flags=re.ASCII):
             raise ValidationError(message)
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
         number = math.nan
-    if isinstance(value, bool) or not math.isfinite(number) or not number.is_integer() or not 1 <= number <= 5:
+    if isinstance(value, bool) or not math.isfinite(number) or not 1 <= number <= 5 or not (number * 2).is_integer():
         raise ValidationError(message)
-    return int(number)
+    return int(number) if number.is_integer() else number
 
 
 def _flag(value: object, column: str) -> bool:
@@ -348,8 +364,13 @@ def parse_rows(rows: Sequence[Sequence[object]]) -> ParseResult:
             address = _text(cell("address"), "address")
             location = _text(cell("location"), "location") if rich_schema else ""
             genre = _text(cell("genre"), "genre") if rich_schema else ""
-            category = genre_label(genre) if rich_schema else _text(cell("category"), "category") or "未分類"
+            category = (
+                ", ".join(_genre_categories(genre)) or "未分類"
+                if rich_schema else _text(cell("category"), "category") or "未分類"
+            )
             note = _text(cell("note"), "note")
+            opening_hours = _text(cell("opening_hours"), "opening_hours") if rich_schema else ""
+            special_opening_hours = _text(cell("special_opening_hours"), "special_opening_hours") if rich_schema else ""
             price_level = _price_level(cell("price_level")) if rich_schema else None
             flags = {column: _flag(cell(column), column) for column in FLAG_COLUMNS} if rich_schema else {}
             latitude, longitude = None, None
@@ -369,6 +390,7 @@ def parse_rows(rows: Sequence[Sequence[object]]) -> ParseResult:
                 restaurant_id, name, area, category, price, distance, address, note,
                 location=location, genre=genre, price_level=price_level,
                 latitude=latitude, longitude=longitude, is_closed=_closed(note), **flags,
+                opening_hours=opening_hours, special_opening_hours=special_opening_hours,
             ))
             if area == "nearby" and distance is None:
                 warn("校外餐廳未填距離，已匯入但尚未確認是否在 2 公里內；請補上「距離（公里）」", row_number)
@@ -404,10 +426,14 @@ def filter_restaurants(restaurants: Sequence[Restaurant], filters: Filters) -> l
                 continue
         if filters.area != "all" and restaurant.area != filters.area:
             continue
-        restaurant_categories = {_normalise(restaurant.category), _normalise(restaurant.genre)}
-        if filters.category != "all" and _normalise(filters.category) not in restaurant_categories:
+        category_values = {
+            _normalise(restaurant.category), _normalise(restaurant.genre),
+            *(_normalise(category) for category in restaurant_categories(restaurant)),
+            *(_normalise(category.strip()) for category in re.split(r"[,，、]", restaurant.genre) if category.strip()),
+        }
+        if filters.category != "all" and _normalise(filters.category) not in category_values:
             continue
-        if categories and categories.isdisjoint(restaurant_categories):
+        if categories and categories.isdisjoint(category_values):
             continue
         if filters.location != "all" and _normalise(filters.location) != _normalise(restaurant.location):
             continue

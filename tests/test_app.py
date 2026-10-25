@@ -27,14 +27,14 @@ def names(app):
 def test_initial_page_loads_real_catalog_for_every_visitor(app):
     state = app.session_state["picker"]
     assert state.is_default and not state.is_demo and state.selected is None
-    assert state.filename is None and len(state.restaurants) == 176
-    assert len(names(app)) == 175
-    assert "孫東寶牛排" in names(app)
-    assert "郭董麻辣牛肉麵" not in names(app)
+    assert state.filename is None and len(state.restaurants) == 10
+    assert len(names(app)) == 10
+    assert "包子商行" in names(app)
+    assert "孫東寶牛排" not in names(app)
     assert not app.button(key="pick_meal").disabled
     assert app.pills(key="location_choices").value == []
-    assert len(app.pills(key="location_choices").options) == 8
-    assert len(app.pills(key="category_choices").options) == 25
+    assert len(app.pills(key="location_choices").options) == 2
+    assert len(app.pills(key="category_choices").options) == 18
     assert len(app.selectbox) == 0 and len(app.multiselect) == 0
     assert len(app.pills) == 5
     assert not any("FOODFLIX" in element.value for element in app.get("html"))
@@ -58,17 +58,17 @@ def test_pick_renders_real_recommendation_without_consecutive_repeats(app):
 
 
 def test_location_genre_price_and_occasion_filters_combine_on_actual_data(app):
-    app.pills(key="location_choices").set_value(["Gongguan"])
-    app.pills(key="category_choices").set_value(["牛排"])
-    app.pills(key="price_choices").set_value([1])
-    app.pills(key="occasion_choice").set_value(["約會", "聚餐"])
+    app.pills(key="location_choices").set_value(["小吃部"])
+    app.pills(key="category_choices").set_value(["速食"])
+    app.pills(key="price_choices").set_value([2])
+    app.pills(key="occasion_choice").set_value(["一個人吃", "聚餐"])
     app.run()
     assert not app.exception
-    assert names(app) == ["孫東寶牛排"]
+    assert names(app) == ["麥當勞"]
     app.button(key="pick_meal").click().run()
     selected = app.session_state["picker"].selected
-    assert selected.name == "孫東寶牛排"
-    assert selected.price is None and selected.price_level == 1
+    assert selected.name == "麥當勞"
+    assert selected.price is None and selected.price_level == 2
 
 
 def test_all_five_feature_flags_are_required_when_selected(app):
@@ -94,27 +94,34 @@ def test_all_five_feature_flags_are_required_when_selected(app):
 
 
 def test_closed_restaurant_can_be_browsed_but_cannot_be_recommended(app):
-    app.text_input(key="query_choice").set_value("郭董麻辣牛肉麵").run()
+    result = parse_rows([
+        EXCEL_HEADERS,
+        ["測試歇業店", "小吃部", "便當", 1, "O", "", "", "O", "", "", "關門了"],
+        ["測試營業店", "清夜", "麵食", 2],
+    ])
+    app.session_state["picker"].import_catalog(result, "歇業測試名單.xlsx")
+    app.run()
+    app.text_input(key="query_choice").set_value("測試歇業店").run()
     assert not app.exception
     assert names(app) == []
     app.checkbox(key="include_closed").check().run()
     assert not app.exception
-    assert names(app) == ["郭董麻辣牛肉麵"]
+    assert names(app) == ["測試歇業店"]
     assert any("關門了" in str(value) for value in app.dataframe[0].value.iloc[0])
     assert app.button(key="pick_meal").disabled
     assert app.session_state["picker"].selected is None
 
 
 def test_changing_location_hides_selection_and_preserves_history(app):
-    app.pills(key="location_choices").set_value(["Gongguan"]).run()
+    app.pills(key="location_choices").set_value(["小吃部"]).run()
     app.button(key="pick_meal").click().run()
     chosen = app.session_state["picker"].selected
-    assert chosen.location == "Gongguan"
-    app.pills(key="location_choices").set_value(["Shida"]).run()
+    assert chosen.location == "小吃部"
+    app.pills(key="location_choices").set_value(["清夜"]).run()
     assert not app.exception
     assert not any('aria-label="餐廳推薦結果"' in element.value for element in app.get("html"))
     assert app.session_state["picker"].history == [chosen]
-    assert len(names(app)) == 3
+    assert names(app) == ["杜蘭小麥 - 義大利麵.披薩"]
 
 
 def test_legacy_custom_catalog_can_be_cleared_back_to_original_public_data(app):
@@ -136,15 +143,15 @@ def test_legacy_custom_catalog_can_be_cleared_back_to_original_public_data(app):
     assert not app.exception
     state = app.session_state["picker"]
     assert state.is_default and state.filename is None
-    assert len(state.restaurants) == 176 and len(names(app)) == 175
+    assert len(state.restaurants) == 10 and len(names(app)) == 10
     assert state.selected is None and state.history == []
     assert state.warnings == [] and len(app.warning) == 0
     assert "我的餐廳.xlsx" not in " ".join(text.value for text in app.get("html"))
 
 
 def test_empty_search_disables_pick_and_reset_clears_every_filter(app):
-    app.pills(key="location_choices").set_value(["Gongguan"])
-    app.pills(key="category_choices").set_value(["牛排"])
+    app.pills(key="location_choices").set_value(["小吃部"])
+    app.pills(key="category_choices").set_value(["速食"])
     app.pills(key="price_choices").set_value([2])
     app.pills(key="occasion_choice").set_value(["一個人吃"])
     app.pills(key="pace_choice").set_value(["快速上菜"])
@@ -161,7 +168,7 @@ def test_empty_search_disables_pick_and_reset_clears_every_filter(app):
     assert app.pills(key="pace_choice").value == []
     assert app.checkbox(key="include_closed").value is False
     assert app.text_input(key="query_choice").value == ""
-    assert len(names(app)) == 175
+    assert len(names(app)) == 10
     assert not app.button(key="pick_meal").disabled
 
 
@@ -198,12 +205,12 @@ def test_multiple_locations_cuisines_and_exact_price_levels_union_within_groups(
 
 
 def test_removing_location_pills_broadens_back_to_the_complete_catalog(app):
-    app.pills(key="location_choices").set_value(["Gongguan", "Shida"]).run()
-    assert not app.exception and len(names(app)) == 78
-    app.pills(key="location_choices").set_value(["Shida"]).run()
-    assert not app.exception and len(names(app)) == 3
+    app.pills(key="location_choices").set_value(["小吃部", "清夜"]).run()
+    assert not app.exception and len(names(app)) == 10
+    app.pills(key="location_choices").set_value(["清夜"]).run()
+    assert not app.exception and len(names(app)) == 1
     app.pills(key="location_choices").set_value([]).run()
-    assert not app.exception and len(names(app)) == 175
+    assert not app.exception and len(names(app)) == 10
 
 
 def test_complete_table_provides_named_google_maps_links(app):
@@ -211,16 +218,16 @@ def test_complete_table_provides_named_google_maps_links(app):
     url = urlparse(first_row["Google 地圖"])
     assert url.scheme == "https" and url.hostname == "www.google.com"
     query = parse_qs(url.query)["query"][0]
-    assert "孫東寶牛排" in query and "公館" in query
+    assert "包子商行" in query and "小吃部" in query
     config = json.loads(app.dataframe[0].proto.columns)
     assert config["Google 地圖"]["type_config"]["type"] == "link"
 
 
 def test_each_filter_group_can_select_all_and_clear_without_affecting_other_groups(app):
     groups = {
-        "location_choices": 8,
-        "category_choices": 25,
-        "price_choices": 5,
+        "location_choices": 2,
+        "category_choices": 18,
+        "price_choices": 6,
         "occasion_choice": 3,
         "pace_choice": 2,
     }
@@ -233,25 +240,30 @@ def test_each_filter_group_can_select_all_and_clear_without_affecting_other_grou
         app.button(key=f"clear_{key}").click().run()
         assert not app.exception
         assert app.pills(key=key).value == []
-        assert len(names(app)) == 175
+        assert len(names(app)) == 10
 
 
 def test_coin_prices_have_the_range_legend_and_readable_table_values(app):
-    displayed = [option.content or option.content_icon for option in app.pills(key="price_choices").proto.options]
-    assert displayed == ["🪙" * level for level in range(1, 6)]
+    displayed = [" ".join(part for part in (option.content_icon, option.content) if part)
+                 for option in app.pills(key="price_choices").proto.options]
+    assert displayed == ["🪙", "🪙 × 1.5", "🪙🪙", "🪙🪙🪙", "🪙🪙🪙🪙", "🪙🪙🪙🪙🪙"]
     legend = next(html.value for html in app.get("html") if "price-legend" in html.value)
     for price_range in ("0–100", "100–200", "200–300", "300–500", "500以上"):
         assert price_range in legend
     table = app.dataframe[0].value
     assert table.iloc[0]["價格"] == "🪙 · NT$0–100"
     assert "價格等級" not in table.columns
+    app.pills(key="price_choices").set_value([1.5]).run()
+    assert not app.exception
+    assert names(app) == ["7-ELEVEN", "漢城異國美食", "蘇記牛肉麵", "一番快餐", "好富熟成黑咖哩.台式蓋飯"]
+    assert all("1.5" in value and "NT$" not in value for value in app.dataframe[0].value["價格"])
 
 
 def test_catalog_pagination_exposes_six_comment_forms_per_page(app):
     assert app.session_state["catalog_page"] == 0
     assert app.button(key="catalog_previous").disabled
     first_cards = [html.value for html in app.get("html") if '<article class="food-card' in html.value]
-    assert len(first_cards) == 6 and "孫東寶牛排" in first_cards[0]
+    assert len(first_cards) == 6 and "包子商行" in first_cards[0]
     assert len([field for field in app.text_area if field.key.startswith("review_body_")]) == 6
     submit_buttons = [button for button in app.button if (button.key or "").startswith("review_submit_")]
     assert len(submit_buttons) == 6 and all(button.disabled for button in submit_buttons)
@@ -260,9 +272,9 @@ def test_catalog_pagination_exposes_six_comment_forms_per_page(app):
     assert not app.exception
     assert app.session_state["catalog_page"] == 1
     second_cards = [html.value for html in app.get("html") if '<article class="food-card' in html.value]
-    assert len(second_cards) == 6 and "泰好吃泰國船麵" in second_cards[0]
-    assert "孫東寶牛排" not in " ".join(second_cards)
-    assert len([field for field in app.text_area if field.key.startswith("review_body_")]) == 6
+    assert len(second_cards) == 4 and "蘇記牛肉麵" in second_cards[0]
+    assert "包子商行" not in " ".join(second_cards)
+    assert len([field for field in app.text_area if field.key.startswith("review_body_")]) == 4
     assert not app.button(key="catalog_previous").disabled
     app.button(key="catalog_previous").click().run()
     assert not app.exception and app.session_state["catalog_page"] == 0
@@ -275,38 +287,44 @@ def test_invalid_review_configuration_keeps_catalog_and_filters_usable(app):
     assert any("評論暫時無法載入" in warning.value for warning in app.warning)
     submit_buttons = [button for button in app.button if (button.key or "").startswith("review_submit_")]
     assert len(submit_buttons) == 6 and all(button.disabled for button in submit_buttons)
-    app.pills(key="location_choices").set_value(["Shida"]).run()
-    assert not app.exception and len(names(app)) == 3
+    app.pills(key="location_choices").set_value(["清夜"]).run()
+    assert not app.exception and len(names(app)) == 1
     assert not app.button(key="pick_meal").disabled
 
 
 def test_top_name_search_ignores_location_filters_and_finds_closed_restaurants(app):
     state = app.session_state["picker"]
-    steak = next(restaurant for restaurant in state.restaurants if restaurant.name == "孫東寶牛排")
-    closed = next(restaurant for restaurant in state.restaurants if restaurant.name == "郭董麻辣牛肉麵")
-    app.pills(key="location_choices").set_value(["Shida"]).run()
-    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    restaurant = next(r for r in state.restaurants if r.name == "麥當勞")
+    app.pills(key="location_choices").set_value(["清夜"]).run()
+    app.text_input(key="query_choice").set_value("麥當勞").run()
     assert not app.exception and names(app) == []
-    assert app.text_area(key=f"review_body_search_{steak.id}").value == ""
-    assert app.text_input(key=f"review_author_search_{steak.id}").label == "您的暱稱"
-    assert app.button(key=f"review_submit_search_{steak.id}").disabled
+    assert app.text_area(key=f"review_body_search_{restaurant.id}").value == ""
+    assert app.text_input(key=f"review_author_search_{restaurant.id}").label == "您的暱稱"
+    assert app.button(key=f"review_submit_search_{restaurant.id}").disabled
 
-    app.text_input(key="query_choice").set_value("郭董麻辣牛肉麵").run()
+    result = parse_rows([
+        EXCEL_HEADERS,
+        ["測試歇業店", "小吃部", "便當", 1, "O", "", "", "O", "", "", "關門了"],
+        ["測試營業店", "清夜", "麵食", 2],
+    ])
+    state.import_catalog(result, "歇業測試名單.xlsx")
+    app.text_input(key="query_choice").set_value("測試歇業店").run()
+    closed = next(r for r in state.restaurants if r.is_closed)
     assert not app.exception and names(app) == []
     assert app.text_area(key=f"review_body_search_{closed.id}").value == ""
     assert app.checkbox(key="include_closed").value is False
     assert app.button(key="pick_meal").disabled
     app.button(key="clear_all_filters").click().run()
-    assert not app.exception and len(names(app)) == 175
+    assert not app.exception and names(app) == ["測試營業店"]
     assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
 
 
 def test_search_recommendation_and_catalog_have_separate_half_star_rating_controls(app):
-    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    app.text_input(key="query_choice").set_value("麥當勞").run()
     app.button(key="pick_meal").click().run()
     assert not app.exception
     restaurant = app.session_state["picker"].selected
-    assert restaurant.name == "孫東寶牛排"
+    assert restaurant.name == "麥當勞"
     bodies = [field for field in app.text_area if restaurant.id in field.key]
     assert len(bodies) == 3 and len({field.key for field in bodies}) == 3
     recommendation_key = f"review_rating_recommendation_{restaurant.id}"
@@ -323,7 +341,11 @@ def test_search_recommendation_and_catalog_have_separate_half_star_rating_contro
 
 
 def test_top_search_paginates_results_and_resets_when_query_changes(app):
-    app.text_input(key="query_choice").set_value("牛排").run()
+    result = parse_rows([EXCEL_HEADERS, *[
+        [f"搜尋測試{index}店", "小吃部", "便當", 1] for index in range(6)
+    ]])
+    app.session_state["picker"].import_catalog(result, "搜尋分頁名單.xlsx")
+    app.text_input(key="query_choice").set_value("搜尋測試").run()
     assert not app.exception
     search_bodies = [field.key for field in app.text_area if field.key.startswith("review_body_search_")]
     assert len(search_bodies) == 3
@@ -334,15 +356,20 @@ def test_top_search_paginates_results_and_resets_when_query_changes(app):
     next_bodies = [field.key for field in app.text_area if field.key.startswith("review_body_search_")]
     assert len(next_bodies) == 3 and set(next_bodies).isdisjoint(search_bodies)
     assert not app.button(key="search_previous").disabled
-    app.text_input(key="query_choice").set_value("孫東寶牛排").run()
+    app.text_input(key="query_choice").set_value("搜尋測試0店").run()
     assert not app.exception
     assert len([field for field in app.text_area if field.key.startswith("review_body_search_")]) == 1
 
 
 def test_clear_search_only_clears_query_and_search_pagination(app):
-    app.pills(key="location_choices").set_value(["Gongguan"])
-    app.pills(key="category_choices").set_value(["牛排"])
-    app.text_input(key="query_choice").set_value("牛排").run()
+    result = parse_rows([EXCEL_HEADERS, *[
+        [f"搜尋測試{index}店", "小吃部", "便當", 1] for index in range(6)
+    ]])
+    app.session_state["picker"].import_catalog(result, "搜尋分頁名單.xlsx")
+    app.run()
+    app.pills(key="location_choices").set_value(["小吃部"])
+    app.pills(key="category_choices").set_value(["便當"])
+    app.text_input(key="query_choice").set_value("搜尋測試").run()
     app.button(key="pick_meal").click().run()
     chosen = app.session_state["picker"].selected
     history = list(app.session_state["picker"].history)
@@ -351,23 +378,23 @@ def test_clear_search_only_clears_query_and_search_pagination(app):
     app.button(key="clear_search_query").click().run()
     assert not app.exception
     assert app.text_input(key="query_choice").value == ""
-    assert app.pills(key="location_choices").value == ["Gongguan"]
-    assert app.pills(key="category_choices").value == ["牛排"]
+    assert app.pills(key="location_choices").value == ["小吃部"]
+    assert app.pills(key="category_choices").value == ["便當"]
     assert app.session_state["search_page"] == 0
     assert "search_signature" not in app.session_state
     assert app.session_state["picker"].selected == chosen
     assert app.session_state["picker"].history == history
-    assert len(names(app)) == 4
+    assert len(names(app)) == 6
     assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
 
 
 def test_homophone_typo_directly_shows_a_real_store_and_review_form_in_search_results(app):
-    restaurant = next(r for r in app.session_state["picker"].restaurants if r.name == "孫東寶牛排")
-    app.pills(key="location_choices").set_value(["Shida"]).run()
-    app.text_input(key="query_choice").set_value("孫東保牛排").run()
+    restaurant = next(r for r in app.session_state["picker"].restaurants if r.name == "麥當勞")
+    app.pills(key="location_choices").set_value(["清夜"]).run()
+    app.text_input(key="query_choice").set_value("麥當牢").run()
     assert not app.exception
-    assert app.text_input(key="query_choice").value == "孫東保牛排"
-    assert app.pills(key="location_choices").value == ["Shida"]
+    assert app.text_input(key="query_choice").value == "麥當牢"
+    assert app.pills(key="location_choices").value == ["清夜"]
     assert names(app) == []
     assert app.text_area(key=f"review_body_search_{restaurant.id}").value == ""
     assert app.text_input(key=f"review_author_search_{restaurant.id}").label == "您的暱稱"
@@ -393,7 +420,7 @@ def test_unrelated_query_shows_empty_search_message_and_clearing_hides_results(a
     assert not any(field.key.startswith("review_body_search_") for field in app.text_area)
     assert not any("找不到相近的店家" in info.value for info in app.info)
     assert not any(heading.value == "搜尋結果" for heading in app.subheader)
-    assert len(names(app)) == 175
+    assert len(names(app)) == 10
 
 
 def test_top_search_is_configured_to_update_after_a_short_typing_pause(app):

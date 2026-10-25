@@ -1,6 +1,7 @@
 """Escaped display helpers for the food catalog and compact restaurant cards."""
 
 from html import escape
+import math
 from urllib.parse import urlencode
 
 from .catalog import location_label
@@ -45,17 +46,38 @@ def number_label(value: float) -> str:
     return f"{number:,.0f}" if number.is_integer() else f"{number:,.2f}".rstrip("0").rstrip(".")
 
 
-def coin_label(level: int | None) -> str:
+def coin_label(level: float | None) -> str:
     """Display the existing source level without changing its stored value."""
-    if isinstance(level, int) and not isinstance(level, bool) and level in PRICE_RANGES:
-        return "🪙" * level
+    if isinstance(level, (int, float)) and not isinstance(level, bool) and 1 <= level <= 5 and level * 2 == int(level * 2):
+        return "🪙" * int(level) if float(level).is_integer() else f"🪙 × {number_label(level)}"
     return "價格未提供"
 
 
 def price_label(restaurant: Restaurant) -> str:
     if restaurant.price_level in PRICE_RANGES:
         return f"{coin_label(restaurant.price_level)} · {PRICE_RANGES[restaurant.price_level]}"
+    if restaurant.price_level is not None and coin_label(restaurant.price_level) != "價格未提供":
+        return coin_label(restaurant.price_level)
     return f"NT$ {number_label(restaurant.price)}" if restaurant.price is not None else "價格未提供"
+
+
+def price_html(restaurant: Restaurant) -> str:
+    """Draw fractional source levels as actual half coins without inventing a budget."""
+    level = restaurant.price_level
+    if level is None or coin_label(level) == "價格未提供" or float(level).is_integer():
+        return escape(price_label(restaurant))
+    coins = '<span aria-hidden="true">🪙</span>' * math.floor(level)
+    coins += '<span class="price-half-coin" aria-hidden="true"><span>🪙</span></span>'
+    return f'<span class="price-coins" role="img" aria-label="{number_label(level)} 枚金幣">{coins}</span>'
+
+
+def hours_html(restaurant: Restaurant) -> str:
+    """Show the supplied schedule as text; it is not a live opening-status check."""
+    return ''.join(
+        f'<p class="card-hours">{label}：{escape(value)}</p>'
+        for label, value in (("營業時間", restaurant.opening_hours), ("特殊營業時間", restaurant.special_opening_hours))
+        if value
+    )
 
 
 def price_legend_html() -> str:
@@ -88,7 +110,10 @@ def map_url(restaurant: Restaurant) -> str:
         query = f"{restaurant.name} {restaurant.address.strip()}"
     else:
         location = area_label(restaurant)
-        context = location if location != "未提供地點" else ""
+        context = {
+            "小吃部": "國立清華大學 小吃部 新竹市",
+            "清夜": "清大夜市 新竹市",
+        }.get(location, location if location != "未提供地點" else "")
         query = " ".join(part for part in (restaurant.name, context, "台灣") if part)
     return "https://www.google.com/maps/search/?" + urlencode({"api": 1, "query": query})
 
@@ -127,10 +152,10 @@ def restaurant_card(restaurant: Restaurant, index: int = 0) -> str:
         '<span class="poster-play" aria-hidden="true">↗</span></div>'
         f'<div class="card-body"><div class="card-meta"><span>{escape(area_label(restaurant))}</span>'
         f'<span>{escape(restaurant.category)}</span></div><h3>{escape(restaurant.name)}</h3>'
-        f'<p class="card-price">{escape(price_label(restaurant))}</p>'
+        f'<p class="card-price">{price_html(restaurant)}</p>'
         f'<p class="card-location">{escape(location)} '
         '<span class="card-map-label">Google 地圖搜尋 ↗</span></p>'
-        f'<div class="card-tags">{tags}</div>{note}</div></a></article>'
+        f'{hours_html(restaurant)}<div class="card-tags">{tags}</div>{note}</div></a></article>'
     )
 
 
@@ -140,6 +165,7 @@ def table_rows(restaurants: list[Restaurant]) -> list[dict[str, object]]:
          "價格": price_label(r), "一個人吃": r.one_person, "約會": r.dating,
          "聚餐": r.gathering, "快速上菜": r.fast_serve, "慢慢享用": r.slow_eat,
          "緯度": r.latitude, "經度": r.longitude, "Google 地圖": map_url(r),
+         "營業時間": r.opening_hours, "特殊營業時間": r.special_opening_hours,
          "備註": r.note, "原表註記歇業": r.is_closed,
          **({"均消（元）": r.price, "距離（公里）": r.distance, "地址": r.address}
             if r.area != "other" or r.price is not None or r.distance is not None or r.address else {})}

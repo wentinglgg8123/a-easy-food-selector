@@ -28,8 +28,8 @@ def test_empty_or_punctuation_only_search_does_not_match_every_store(query):
 
 
 @pytest.mark.parametrize("query", ["孫東保牛排", "孫冬保", "孫東寶牛扒", "孫東保"])
-def test_actual_catalog_suggests_the_real_restaurant_for_homophones_and_typos(query):
-    stores = load_default_catalog().restaurants
+def test_historical_brand_regression_suggests_real_name_for_homophones_and_typos(query):
+    stores = [restaurant("孫東寶牛排")]
     assert find_restaurants(stores, query) == []
     suggestions = suggest_restaurants(stores, query)
     assert suggestions and suggestions[0].name == "孫東寶牛排"
@@ -37,10 +37,18 @@ def test_actual_catalog_suggests_the_real_restaurant_for_homophones_and_typos(qu
 
 
 def test_brand_name_homophones_keep_single_character_readings_suppressed_by_phrases():
-    stores = load_default_catalog().restaurants
+    stores = [restaurant("頂呱呱")]
     assert find_restaurants(stores, "頂瓜瓜") == []
     suggestions = suggest_restaurants(stores, "頂瓜瓜")
     assert suggestions and suggestions[0].name == "頂呱呱"
+
+
+def test_current_bundled_catalog_suggests_the_uploaded_store_for_a_homophone():
+    stores = load_default_catalog().restaurants
+    assert find_restaurants(stores, "麥當牢") == []
+    suggestions = suggest_restaurants(stores, "麥當牢")
+    assert suggestions and suggestions[0].name == "麥當勞"
+    assert all(item in stores for item in suggestions)
 
 
 def test_partial_homophones_match_a_contiguous_window_in_longer_names():

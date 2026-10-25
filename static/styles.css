@@ -166,6 +166,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role='combobox']:fo
 .card-meta > span:first-child { color: var(--accent); }
 .card-body h3 { margin: 8px 0; padding: 0; color: var(--ink); font-size: 16px; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; }
 .card-price { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.price-coins { display: inline-flex; align-items: center; gap: .05em; vertical-align: middle; }
+.price-half-coin { display: inline-block; width: .6em; overflow: hidden; white-space: nowrap; }
+.price-half-coin > span { display: inline-block; width: 1.2em; }
+.card-hours { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .card-location { margin: 9px 0 0; color: var(--accent); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .card-map-label { display: block; text-decoration: underline; text-underline-offset: 3px; }
 .card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }

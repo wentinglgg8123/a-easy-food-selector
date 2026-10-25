@@ -12,6 +12,7 @@ from food_picker.defaults import load_default_catalog
 from food_picker.excel import (
     EXCEL_HEADERS,
     LEGACY_HEADERS,
+    SCHEDULE_HEADERS,
     MAX_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_BYTES,
     MAX_ZIP_ENTRIES,
@@ -42,15 +43,17 @@ def test_template_uses_full_schema_and_clearly_fictional_examples():
     assert len(result.restaurants) == 2
     assert not result.warnings
     assert all(item.name.startswith("示範・") and "虛構" in item.note for item in result.restaurants)
-    assert [item.location for item in result.restaurants] == ["Gongguan", "School"]
-    assert [item.price_level for item in result.restaurants] == [1, 3]
+    assert [item.location for item in result.restaurants] == ["小吃部", "清夜"]
+    assert [item.price_level for item in result.restaurants] == [1.5, 3]
+    assert result.restaurants[0].opening_hours == "7:00~19:00"
+    assert result.restaurants[0].special_opening_hours == "假日營業時間另行公告"
     assert all(item.price is None for item in result.restaurants)
     assert result.restaurants[0].one_person and result.restaurants[0].fast_serve
     assert result.restaurants[1].dating and result.restaurants[1].gathering and result.restaurants[1].slow_eat
     with BytesIO(content) as stream:
         workbook = load_workbook(stream)
         sheet = workbook.active
-        assert tuple(cell.value for cell in sheet[1]) == EXCEL_HEADERS
+        assert tuple(cell.value for cell in sheet[1]) == EXCEL_HEADERS + SCHEDULE_HEADERS
         assert sheet.freeze_panes == "A2"
         assert sheet["A1"].font.bold
         assert sheet["E1"].comment
@@ -192,7 +195,7 @@ def test_export_contains_only_requested_restaurants():
 def test_export_roundtrip_preserves_all_bundled_catalog_fields():
     original = load_default_catalog().restaurants
     imported = parse_excel(export_restaurants(original), "完整餐廳.xlsx").restaurants
-    assert len(original) == len(imported) == 176
+    assert len(original) == len(imported) == 10
     assert imported == original
 
 
